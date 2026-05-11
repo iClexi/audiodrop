@@ -67,6 +67,27 @@ async def health() -> dict:
     return {"status": "ok", "version": app.version}
 
 
+_ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.68.83")
+
+
+@app.get("/api/admin-eligible")
+async def admin_eligible(request: Request) -> dict:
+    """Sólo true si la petición llegó directo por LAN (no via Cloudflare) desde la IP del admin.
+
+    Mecánica de seguridad:
+      1) `cf-ray` o `cf-connecting-ip` presentes → viene por Cloudflare → no admin.
+      2) La IP claim es la primera del `X-Forwarded-For` (que pone Apache local). Si no hay
+         XFF, usamos la del socket. Sólo coincide con `_ADMIN_LAN_IP` cuando el cliente está
+         realmente en la LAN y resuelve via DNS local (split-horizon).
+    """
+    cf_headers = request.headers.get("cf-ray") or request.headers.get("cf-connecting-ip")
+    if cf_headers:
+        return {"eligible": False}
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")
+    client_ip = xff[0].strip() if xff and xff[0].strip() else (request.client.host if request.client else "")
+    return {"eligible": client_ip == _ADMIN_LAN_IP}
+
+
 @app.post("/api/metadata")
 async def metadata(payload: dict) -> JSONResponse:
     url = (payload or {}).get("url", "").strip()

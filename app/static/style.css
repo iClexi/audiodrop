@@ -229,6 +229,32 @@ button { font-family: inherit; cursor: pointer; border: 0; }
 .feat-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; color: #c4b5fd; flex: 0 0 auto; }
 .feat-icon svg { width: 16px; height: 16px; display: block; }
 
+/* ---------------- admin link (sólo visible en LAN admin) ---------------- */
+.admin-link {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #fde68a;
+  text-decoration: none;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(168, 85, 247, 0.18));
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  box-shadow: 0 6px 20px -6px rgba(245, 158, 11, 0.4);
+  backdrop-filter: blur(12px) saturate(160%);
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+.admin-link:hover { transform: translateY(-1px); box-shadow: 0 10px 28px -6px rgba(245, 158, 11, 0.55); }
+.admin-link svg { display: block; }
+
 /* ---------------- footer ---------------- */
 .footer { width: 100%; text-align: center; font-size: 12.5px; color: var(--muted); padding: 18px 16px 28px; display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
 

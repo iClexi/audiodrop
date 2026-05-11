@@ -3,6 +3,12 @@
 (() => {
   'use strict';
 
+  // Muestra el botón de admin sólo si el backend dice "eligible" (LAN del admin, sin Cloudflare).
+  fetch('/api/admin-eligible', { credentials: 'same-origin' })
+    .then((r) => r.ok ? r.json() : { eligible: false })
+    .then((d) => { if (d && d.eligible) document.getElementById('admin-link')?.classList.remove('hidden'); })
+    .catch(() => {});
+
   const $ = (id) => document.getElementById(id);
   const form = $('form');
   const urlInput = $('url');
