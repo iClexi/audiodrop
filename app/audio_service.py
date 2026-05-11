@@ -25,6 +25,20 @@ log = logging.getLogger("audiodrop.service")
 
 JOB_TTL_SECONDS = 60 * 60
 JANITOR_INTERVAL_SECONDS = 60 * 5
+INFO_CACHE_TTL = 90  # segundos: reusamos info extraída para no llamar a yt-dlp 2 veces seguidas
+INFO_CACHE: dict[str, tuple[float, dict]] = {}
+
+# Cliente "ios" suele entregar URLs HLS sin SABR, evita el retry de yt-dlp.
+_BASE_YDL_OPTS: dict = {
+    "quiet": True,
+    "no_warnings": True,
+    "noplaylist": True,
+    "concurrent_fragment_downloads": 5,
+    "extractor_args": {"youtube": {"player_client": ["ios", "web"]}},
+    "cachedir": "/tmp/audiodrop-cache",
+    "retries": 2,
+    "fragment_retries": 2,
+}
 
 # Opciones de audio que siempre ofrecemos (yt-dlp + ffmpeg pueden generar cualquiera).
 AUDIO_OPTIONS = [
@@ -136,8 +150,7 @@ class AudioService:
     # ---------------------------------------------------------------- metadata
 
     async def fetch_metadata(self, url: str) -> dict:
-        loop = asyncio.get_running_loop()
-        info = await loop.run_in_executor(None, self._extract_info, url)
+        info = await self._cached_info(url)
         duration = info.get("duration") or 0
         if duration and duration > self.max_duration:
             raise ConversionError(
@@ -152,8 +165,23 @@ class AudioService:
             "video_options": _available_video_options(info),
         }
 
+    async def _cached_info(self, url: str) -> dict:
+        """Devuelve info de yt-dlp con cache corto (evita llamar dos veces seguidas)."""
+        now = time.time()
+        cached = INFO_CACHE.get(url)
+        if cached and now - cached[0] < INFO_CACHE_TTL:
+            return cached[1]
+        loop = asyncio.get_running_loop()
+        info = await loop.run_in_executor(None, self._extract_info, url)
+        INFO_CACHE[url] = (now, info)
+        # Limpia entradas viejas para no crecer infinito.
+        for k, (ts, _) in list(INFO_CACHE.items()):
+            if now - ts > INFO_CACHE_TTL * 4:
+                INFO_CACHE.pop(k, None)
+        return info
+
     def _extract_info(self, url: str) -> dict:
-        opts = {"quiet": True, "no_warnings": True, "skip_download": True, "extract_flat": False}
+        opts = {**_BASE_YDL_OPTS, "skip_download": True, "extract_flat": False}
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 return ydl.extract_info(url, download=False) or {}
@@ -171,20 +199,29 @@ class AudioService:
     # ---------------------------------------------------------------- jobs
 
     async def start_job(self, url: str, format_key: str = "mp3-192") -> str:
-        _parse_format_key(format_key)  # valida antes de gastar metadata
-        meta = await self.fetch_metadata(url)
+        _parse_format_key(format_key)
+        # Reusa la info ya extraída por /api/metadata (cache de 90s); evita llamar yt-dlp 2 veces.
+        info = await self._cached_info(url)
+        duration = info.get("duration") or 0
+        if duration and duration > self.max_duration:
+            raise ConversionError(
+                f"Video demasiado largo ({duration//60} min). Máximo {self.max_duration//60} min."
+            )
         self._loop = asyncio.get_running_loop()
         job_id = uuid.uuid4().hex
         job = Job(
             job_id=job_id,
             url=url,
             format_key=format_key,
-            title=meta["title"],
-            thumbnail=meta["thumbnail"],
-            duration=meta["duration"],
+            title=info.get("title") or "Media",
+            thumbnail=info.get("thumbnail") or "",
+            duration=duration,
         )
         async with self._lock:
             self.jobs[job_id] = job
+        # Estado inicial visible inmediatamente: el cliente verá "Preparando" sin esperar.
+        job.status = "downloading"
+        job.message = "Preparando…"
         asyncio.create_task(self._run_job(job))
         return job_id
 
@@ -268,18 +305,17 @@ class AudioService:
                 self._publish_sync(job, status="error", message="Error de descarga.")
 
         base_opts: dict = {
-            "quiet": True,
-            "no_warnings": True,
+            **_BASE_YDL_OPTS,
             "outtmpl": outtmpl,
-            "noplaylist": True,
             "max_filesize": 2 * 1024 * 1024 * 1024,  # 2 GiB hard cap
             "progress_hooks": [hook],
         }
 
         if kind == "audio":
+            # Prefiere m4a (AAC nativo de YouTube): ffmpeg sólo re-encodea a MP3, no re-mux.
             opts = {
                 **base_opts,
-                "format": "bestaudio/best",
+                "format": "bestaudio[ext=m4a]/bestaudio/best",
                 "postprocessors": [
                     {
                         "key": "FFmpegExtractAudio",
@@ -292,10 +328,11 @@ class AudioService:
         else:
             height = params["height"]
             fps = params["fps"]
-            # Pedimos el mejor video <=altura y fps deseados, mergeado con mejor audio.
-            # Si fps==60 yt-dlp aceptará 60 o cualquiera <=60; para 30 limitamos a <=30.
             fps_filter = "" if fps == 60 else "[fps<=30]"
+            # Priorizamos formatos mp4+m4a: merge es sólo remux (rápido, sin re-encode).
+            # Fallback a cualquier formato + merge a mp4 si no hay mp4 nativo.
             fmt = (
+                f"bestvideo[height<={height}][ext=mp4][vcodec^=avc]{fps_filter}+bestaudio[ext=m4a]/"
                 f"bestvideo[height<={height}][ext=mp4]{fps_filter}+bestaudio[ext=m4a]/"
                 f"bestvideo[height<={height}]{fps_filter}+bestaudio/"
                 f"best[height<={height}]"
@@ -304,9 +341,7 @@ class AudioService:
                 **base_opts,
                 "format": fmt,
                 "merge_output_format": "mp4",
-                "postprocessors": [
-                    {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},
-                ],
+                # SIN FFmpegVideoConvertor — el merge ya entrega .mp4 sin re-encode innecesario.
             }
             expected_ext = "mp4"
 

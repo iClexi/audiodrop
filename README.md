@@ -2,7 +2,7 @@
 
 # AudioDrop
 
-### YouTube a MP3 — rápido, elegante y sin fricción.
+### YouTube → MP3 o MP4. Rápido, elegante y sin fricción.
 
 <br/>
 
@@ -18,32 +18,37 @@
 
 ## ¿Qué es esto?
 
-**AudioDrop** es una app web minimalista para convertir videos de YouTube en archivos MP3.
-Backend en Python con **FastAPI**, descargas con **yt-dlp**, conversión con **ffmpeg**,
-y un frontend en HTML/CSS/JS puro con tema oscuro, glassmorphism y animaciones suaves.
+**AudioDrop** es una app web minimalista para descargar audio (**MP3**) o video (**MP4**) de YouTube,
+con selector de calidad. Backend en Python con **FastAPI**, descargas con **yt-dlp**, conversión con
+**ffmpeg**, frontend en HTML/CSS/JS puro con tema oscuro, glassmorphism y animaciones suaves.
 
-- Pega una URL → te mostramos thumbnail, título y duración.
-- Pulsa convertir → vemos el progreso en tiempo real (SSE).
-- Descarga el MP3 → lo borramos del servidor a los pocos segundos.
+- Pega una URL → preview con thumbnail, título, uploader y duración.
+- Elige **Audio** o **Video** y escoge la calidad disponible.
+- Pulsa convertir → progreso en tiempo real (Server-Sent Events).
+- Descarga el archivo → lo borramos del servidor a los pocos segundos.
 - Sin cuentas, sin trackers, sin pasos extra.
 
 ## Características
 
-- 🎵 Audio MP3 a 192 kbps por defecto.
-- ⚡ Progreso en vivo con Server-Sent Events.
-- 🔒 Sanitización de nombres, validación de URL, límite de duración (30 min).
-- 🧹 Limpieza automática de archivos temporales.
-- 📱 Responsive total — móvil y escritorio.
+- 🎵 **Audio MP3** a 128 / 192 / 320 kbps.
+- 🎬 **Video MP4** hasta 4K, con variantes 60 fps cuando el video original las tiene
+  (360p · 480p · 720p · 720p60 · 1080p · 1080p60 · 1440p · 1440p60 · 4K · 4K60).
+- ⚡ Optimizado para arrancar rápido: `concurrent_fragment_downloads=5`, cache de
+  metadatos, sin re-encode de video cuando los streams ya están en mp4.
+- 📡 Progreso en vivo con Server-Sent Events.
+- 🔒 Sanitización de nombres, validación de URL, límite de duración (30 min) y tamaño (2 GiB).
+- 🧹 Limpieza automática: archivos borrados al descargar + janitor cada 5 min.
+- 📱 Responsive total — móvil y escritorio (probado iPhone 13 Pro e iPad).
 - 🪟 UI premium tipo SaaS: dark mode, glassmorphism, blur, gradients.
-- 🛡️ Servicio aislado en systemd con hardening básico.
+- 🛡️ Servicio aislado en systemd con hardening básico (no root, `ProtectSystem=strict`, `MemoryMax=600M`).
 
 ## Stack
 
 | Capa       | Herramienta                                |
 |------------|--------------------------------------------|
 | Backend    | Python 3.10+, FastAPI, Uvicorn             |
-| Descarga   | yt-dlp                                     |
-| Audio      | ffmpeg (postprocessor)                     |
+| Descarga   | yt-dlp (`player_client: ios,web` para evitar SABR) |
+| Conversión | ffmpeg (postprocessor de yt-dlp)           |
 | Streaming  | SSE (`StreamingResponse` de Starlette)     |
 | Frontend   | HTML5, CSS3 (custom props, backdrop-filter), JS vanilla |
 | Fuentes    | Inter + JetBrains Mono (Google Fonts)      |
@@ -55,15 +60,15 @@ y un frontend en HTML/CSS/JS puro con tema oscuro, glassmorphism y animaciones s
 audiodrop-work/
 ├── app/
 │   ├── main.py             # Endpoints HTTP (FastAPI)
-│   ├── audio_service.py    # yt-dlp + ffmpeg + cleanup
+│   ├── audio_service.py    # yt-dlp + ffmpeg + cleanup + cache
 │   ├── templates/
-│   │   └── index.html      # Vista principal
+│   │   └── index.html      # Vista principal con tabs Audio/Video
 │   └── static/
 │       ├── style.css       # Glassmorphism dark theme
 │       └── app.js          # State machine del frontend
 ├── deploy/
 │   ├── audiodrop.service       # Unidad systemd
-│   ├── 006-audiodrop.conf      # vhost Apache
+│   ├── 006-audiodrop.conf      # vhost Apache (con Cache-Control: no-store en /static)
 │   └── install.sh              # Instalador one-shot
 ├── requirements.txt
 ├── .env.example
@@ -78,30 +83,48 @@ audiodrop-work/
 |--------|-------------------------------|----------------------------------------------|
 | GET    | `/`                           | UI principal                                 |
 | GET    | `/api/health`                 | Healthcheck                                  |
-| POST   | `/api/metadata`               | Lee título, thumbnail y duración             |
-| POST   | `/api/convert`                | Lanza el job y devuelve `job_id`             |
+| POST   | `/api/metadata`               | Título, thumbnail, duración + `audio_options` y `video_options` disponibles |
+| POST   | `/api/convert`                | Lanza el job. Body: `{url, format}` donde `format` ∈ `mp3-128 \| mp3-192 \| mp3-320 \| video-<height>[60]` |
 | GET    | `/api/progress/{job_id}`      | Stream SSE con el progreso                   |
-| GET    | `/api/download/{job_id}`      | Descarga el MP3 (borra el archivo después)   |
+| GET    | `/api/download/{job_id}`      | Descarga el archivo (borra el server side después) |
+
+### Ejemplo
+
+```bash
+# 1) Metadata (lista calidades disponibles para ese video)
+curl -s -X POST http://localhost:3400/api/metadata \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}' | jq
+
+# 2) Convertir a video 1080p
+JOB=$(curl -s -X POST http://localhost:3400/api/convert \
+  -H 'Content-Type: application/json' \
+  -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","format":"video-1080p"}' | jq -r .job_id)
+
+# 3) Escuchar progreso
+curl -N http://localhost:3400/api/progress/$JOB
+
+# 4) Descargar
+curl -o video.mp4 http://localhost:3400/api/download/$JOB
+```
 
 ## Quickstart — desarrollo local
 
 Requisitos: `python3` 3.10+, `ffmpeg` en el `PATH`.
 
 ```bash
-git clone <este-repo> audiodrop && cd audiodrop
+git clone https://github.com/iClexi/audiodrop && cd audiodrop
 ./run.sh
 # Abre http://localhost:3400
 ```
 
 ## Despliegue en Ubuntu / Debian (sin Docker)
 
-El proyecto incluye un instalador idempotente:
-
 ```bash
 sudo bash deploy/install.sh
 ```
 
-Hace lo siguiente:
+Hace lo siguiente, idempotente:
 
 1. Instala `python3-venv`, `python3-pip` y `ffmpeg`.
 2. Crea el usuario `infra` si no existe.
@@ -110,20 +133,25 @@ Hace lo siguiente:
 5. Escribe `/etc/audiodrop/audiodrop.env` con los defaults.
 6. Habilita la unidad `audiodrop.service` y arranca el servicio.
 
-Después puedes copiar el vhost de Apache:
+Después, copia el vhost de Apache (con `Cache-Control: no-store` para evitar JS/CSS viejo en CDN):
 
 ```bash
 sudo cp deploy/006-audiodrop.conf /etc/apache2/sites-enabled/
+sudo a2enmod headers
 sudo systemctl reload apache2
 ```
 
-O servirlo con nginx:
+O sirvelo con nginx:
 
 ```nginx
 server {
   listen 80;
   server_name audiodrop.example.com;
 
+  location /static/ {
+    proxy_pass http://127.0.0.1:3400/static/;
+    add_header Cache-Control "no-store, must-revalidate";
+  }
   location / {
     proxy_pass http://127.0.0.1:3400;
     proxy_http_version 1.1;
@@ -136,7 +164,8 @@ server {
 }
 ```
 
-O detrás de **Cloudflare Tunnel** apuntando al `127.0.0.1:3400` de la VM.
+O detrás de **Cloudflare Tunnel** apuntando al `127.0.0.1:3400` (o al puerto del socat
+si usas un patrón socat → VIP HA).
 
 ## Variables de entorno
 
@@ -147,22 +176,39 @@ O detrás de **Cloudflare Tunnel** apuntando al `127.0.0.1:3400` de la VM.
 | `AUDIODROP_MAX_DURATION`  | `1800`             | Duración máxima permitida del video (segundos). |
 | `AUDIODROP_LOG_LEVEL`     | `INFO`             | Nivel de logs.                                  |
 
+## Performance
+
+Lo que se ha optimizado para que "Preparando…" no se eternice:
+
+- **Cache de metadatos** (90 s, in-memory): `/api/metadata` y `/api/convert` ya no llaman a
+  yt-dlp dos veces seguidas para la misma URL.
+- **`player_client=[ios, web]`**: evita el modo SABR que añade retries en YouTube.
+- **`concurrent_fragment_downloads=5`**: las descargas DASH bajan 5 fragmentos en paralelo.
+- **Sin re-encode innecesario de video**: usamos `merge_output_format='mp4'` y un selector que
+  prioriza `mp4+m4a` (sólo remux, no transcode). Quitamos `FFmpegVideoConvertor` que forzaba un
+  re-encode adicional.
+- **Audio prefiere m4a** como fuente → ffmpeg sólo convierte audio (no re-empaqueta video).
+- **Dedup de SSE**: el servidor no spamea frames repetidos al cliente.
+- **`cachedir`** de yt-dlp en `/tmp/audiodrop-cache` para reuso de signatures entre runs.
+
 ## Seguridad
 
-- El servicio corre como **`infra`** (no root) con `NoNewPrivileges`, `ProtectSystem=full`, `ProtectHome=true` y `MemoryMax=600M`.
-- Se validan las URLs con regex y se sanitizan los nombres de archivo.
-- Se rechazan videos privados o no disponibles con un mensaje legible.
-- Se limita la duración a 30 minutos por defecto y el tamaño a 500 MB.
-- El cuerpo HTTP está topado en 8 KiB por el reverse proxy (sólo necesitamos una URL).
-- Las descargas se borran tras 1 hora o tras la descarga del usuario.
+- El servicio corre como **`infra`** (no root) con `NoNewPrivileges`, `ProtectSystem=strict`,
+  `ProtectHome=true` y `MemoryMax=600M`.
+- URLs validadas por regex, nombres de archivo sanitizados.
+- Videos privados o no disponibles devuelven un mensaje legible (no stacktrace).
+- Duración máxima 30 min por defecto, tamaño máximo 2 GiB.
+- Cuerpo HTTP topado a 8 KiB por el reverse proxy.
+- Descargas se borran tras 1 h o al completar la descarga del cliente.
 
-## Limitaciones / por hacer
+## Limitaciones
 
-- Sin cola persistente: si reinicias el servicio, los jobs en curso se pierden.
-- Un único worker por proceso. Para escalar horizontal añade varios workers de uvicorn + un job store.
+- Sin cola persistente: reiniciar el servicio pierde los jobs en curso.
+- Un único worker por proceso. Para alta concurrencia: varios workers de uvicorn + un job store
+  (Redis / SQLite).
 - Sólo procesa videos individuales (no playlists).
 
 ## Licencia
 
-MIT. Usa la herramienta de forma responsable y respeta los términos de servicio de YouTube
-y los derechos del contenido al que se acceda.
+MIT. Úsalo responsablemente y respeta los Términos de Servicio de YouTube y los derechos del
+contenido al que se acceda.
