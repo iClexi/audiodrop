@@ -1,0 +1,35 @@
+[Unit]
+Description=AudioDrop — YouTube a MP3 (FastAPI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=infra
+Group=infra
+WorkingDirectory=/opt/audiodrop/app
+EnvironmentFile=/etc/audiodrop/audiodrop.env
+ExecStart=/opt/audiodrop/venv/bin/uvicorn main:app \
+  --app-dir /opt/audiodrop/app/app \
+  --host 0.0.0.0 \
+  --port 3400 \
+  --proxy-headers \
+  --forwarded-allow-ips=*
+Restart=always
+RestartSec=3
+
+# Hardening básico — no ejecutamos como root y aislamos lo posible.
+# Nota: PrivateTmp da un /tmp privado al servicio (donde vivirán las descargas).
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/audiodrop
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+MemoryAccounting=true
+MemoryMax=600M
+
+[Install]
+WantedBy=multi-user.target

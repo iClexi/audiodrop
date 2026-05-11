@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0b14" />
+  <meta name="description" content="AudioDrop — convierte videos de YouTube en MP3 con elegancia." />
+  <title>AudioDrop · YouTube a MP3</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23a855f7'/%3E%3Cstop offset='1' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M11 11v10l8-5z' fill='white'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <div class="aurora" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+    <span class="grid"></span>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="AudioDrop">
+      <span class="brand-mark" aria-hidden="true">
+        <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="9" fill="url(#bgrad)" />
+          <path d="M11 11v10l8-5z" fill="white" />
+          <defs>
+            <linearGradient id="bgrad" x1="0" x2="1" y1="0" y2="1">
+              <stop offset="0" stop-color="#a855f7" />
+              <stop offset="1" stop-color="#06b6d4" />
+            </linearGradient>
+          </defs>
+        </svg>
+      </span>
+      <span class="brand-name">AudioDrop</span>
+    </a>
+    <span class="tag">beta</span>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <h1 class="title">
+        Convierte YouTube a <span class="grad">MP3</span> en segundos.
+      </h1>
+      <p class="subtitle">
+        Pega un enlace. Te entregamos un archivo limpio, listo para llevar.
+      </p>
+
+      <form id="form" class="card glass" novalidate>
+        <label class="sr-only" for="url">URL de YouTube</label>
+        <div class="field">
+          <span class="field-icon" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          </span>
+          <input id="url" name="url" type="url" inputmode="url" autocomplete="off" spellcheck="false"
+                 placeholder="https://www.youtube.com/watch?v=…" required />
+          <button id="paste" type="button" class="ghost" aria-label="Pegar desde portapapeles">Pegar</button>
+        </div>
+        <button id="submit" type="submit" class="primary">
+          <span class="primary-label">Convertir a MP3</span>
+          <span class="primary-spinner" aria-hidden="true"></span>
+        </button>
+        <p id="hint" class="hint" role="status" aria-live="polite"></p>
+      </form>
+
+      <section id="preview" class="card glass preview hidden" aria-live="polite">
+        <div class="preview-thumb">
+          <img id="thumb" alt="" loading="lazy" />
+        </div>
+        <div class="preview-meta">
+          <div class="preview-row">
+            <span class="badge" id="badge">Listo</span>
+            <span class="dot"></span>
+            <span class="muted" id="duration">—</span>
+          </div>
+          <h2 id="title" class="preview-title">…</h2>
+          <p id="uploader" class="muted preview-uploader"></p>
+          <div class="progress" aria-hidden="true">
+            <div id="bar" class="progress-bar"></div>
+            <div class="progress-glow"></div>
+          </div>
+          <p id="status" class="status muted">Preparando…</p>
+          <a id="download" class="primary download hidden" download>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Descargar MP3
+          </a>
+        </div>
+      </section>
+
+      <ul class="features" aria-label="Características">
+        <li><span class="feat-icon">⚡</span><span>Conversión rápida</span></li>
+        <li><span class="feat-icon">🔒</span><span>Sin guardar nada</span></li>
+        <li><span class="feat-icon">🎧</span><span>MP3 a 192 kbps</span></li>
+        <li><span class="feat-icon">📱</span><span>Responsive total</span></li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Hecho con cariño</span>
+    <span class="muted">·</span>
+    <span class="muted">Tus archivos se borran solos cuando termina la descarga.</span>
+  </footer>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
