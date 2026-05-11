@@ -1,7 +1,10 @@
-"""AudioService — descarga + conversión MP3 con yt-dlp y ffmpeg.
+"""MediaService — descarga + conversión con yt-dlp y ffmpeg.
 
-Toda la lógica que toca yt-dlp o el sistema de archivos vive aquí.
-La capa HTTP (main.py) no debería tocar nada de esto directamente.
+Soporta dos modos:
+- audio: extrae MP3 a 128/192/320 kbps
+- video: descarga MP4 hasta 1080p (30 o 60 fps)
+
+La capa HTTP nunca debería tocar yt-dlp ni el sistema de archivos directamente.
 """
 from __future__ import annotations
 
@@ -20,8 +23,30 @@ from starlette.background import BackgroundTask
 
 log = logging.getLogger("audiodrop.service")
 
-JOB_TTL_SECONDS = 60 * 60          # 1 hora antes de borrar el MP3
-JANITOR_INTERVAL_SECONDS = 60 * 5  # 5 min entre pases del recolector
+JOB_TTL_SECONDS = 60 * 60
+JANITOR_INTERVAL_SECONDS = 60 * 5
+
+# Opciones de audio que siempre ofrecemos (yt-dlp + ffmpeg pueden generar cualquiera).
+AUDIO_OPTIONS = [
+    {"key": "mp3-320", "label": "MP3 · 320 kbps", "bitrate": "320"},
+    {"key": "mp3-192", "label": "MP3 · 192 kbps", "bitrate": "192"},
+    {"key": "mp3-128", "label": "MP3 · 128 kbps", "bitrate": "128"},
+]
+
+# Resoluciones de video que ofrecemos cuando están disponibles. (height, fps, label, key)
+# fps=60 sólo se ofrece si el video tiene un formato real con fps>=50 a esa altura.
+VIDEO_QUALITIES = [
+    (2160, 60, "4K · 60 fps", "video-2160p60"),
+    (2160, 30, "4K", "video-2160p"),
+    (1440, 60, "1440p · 60 fps", "video-1440p60"),
+    (1440, 30, "1440p", "video-1440p"),
+    (1080, 60, "1080p · 60 fps", "video-1080p60"),
+    (1080, 30, "1080p", "video-1080p"),
+    (720, 60, "720p · 60 fps", "video-720p60"),
+    (720, 30, "720p", "video-720p"),
+    (480, 30, "480p", "video-480p"),
+    (360, 30, "360p", "video-360p"),
+]
 
 
 class ConversionError(Exception):
@@ -36,6 +61,7 @@ class JobNotFound(Exception):
 class Job:
     job_id: str
     url: str
+    format_key: str = "mp3-192"
     title: str = ""
     thumbnail: str = ""
     duration: int = 0
@@ -51,8 +77,51 @@ class Job:
 
 def _safe_filename(name: str) -> str:
     name = re.sub(r"[^\w\-. ]+", "_", name, flags=re.UNICODE)
-    name = name.strip(" ._") or "audio"
+    name = name.strip(" ._") or "media"
     return name[:120]
+
+
+def _parse_format_key(key: str) -> tuple[str, dict]:
+    """Devuelve ('audio'|'video', params) o lanza ConversionError."""
+    if key.startswith("mp3-"):
+        bitrate = key.split("-", 1)[1]
+        if bitrate not in ("128", "192", "320"):
+            raise ConversionError("Bitrate de audio no soportado.")
+        return "audio", {"bitrate": bitrate}
+    if key.startswith("video-"):
+        for height, fps, _label, k in VIDEO_QUALITIES:
+            if k == key:
+                return "video", {"height": height, "fps": fps}
+        raise ConversionError("Calidad de video no soportada.")
+    raise ConversionError("Formato no reconocido.")
+
+
+def _available_video_options(info: dict) -> list[dict]:
+    """Filtra VIDEO_QUALITIES contra los formatos reales que tiene el video.
+
+    - Una altura está disponible si hay al menos un formato de video con esa altura.
+    - La variante "60 fps" se ofrece sólo cuando algún formato a esa altura tiene fps>=50.
+    """
+    formats = info.get("formats") or []
+    max_fps_per_height: dict[int, float] = {}
+    for f in formats:
+        if (f.get("vcodec") or "none") == "none":
+            continue
+        h = f.get("height") or 0
+        fps = float(f.get("fps") or 0)
+        if h <= 0:
+            continue
+        if fps > max_fps_per_height.get(h, 0):
+            max_fps_per_height[h] = fps
+
+    available = []
+    for height, fps_target, label, key in VIDEO_QUALITIES:
+        if height not in max_fps_per_height:
+            continue
+        if fps_target == 60 and max_fps_per_height[height] < 50:
+            continue
+        available.append({"key": key, "label": label, "height": height, "fps": fps_target})
+    return available
 
 
 class AudioService:
@@ -75,10 +144,12 @@ class AudioService:
                 f"Video demasiado largo ({duration//60} min). Máximo {self.max_duration//60} min."
             )
         return {
-            "title": info.get("title") or "Audio",
+            "title": info.get("title") or "Media",
             "thumbnail": info.get("thumbnail") or "",
             "duration": duration,
             "uploader": info.get("uploader") or "",
+            "audio_options": AUDIO_OPTIONS,
+            "video_options": _available_video_options(info),
         }
 
     def _extract_info(self, url: str) -> dict:
@@ -99,13 +170,15 @@ class AudioService:
 
     # ---------------------------------------------------------------- jobs
 
-    async def start_job(self, url: str) -> str:
+    async def start_job(self, url: str, format_key: str = "mp3-192") -> str:
+        _parse_format_key(format_key)  # valida antes de gastar metadata
         meta = await self.fetch_metadata(url)
         self._loop = asyncio.get_running_loop()
         job_id = uuid.uuid4().hex
         job = Job(
             job_id=job_id,
             url=url,
+            format_key=format_key,
             title=meta["title"],
             thumbnail=meta["thumbnail"],
             duration=meta["duration"],
@@ -124,7 +197,8 @@ class AudioService:
         q.put_nowait(self._snapshot(job))
         return q
 
-    def file_for(self, job_id: str) -> tuple[Path, str]:
+    def file_for(self, job_id: str) -> tuple[Path, str, str]:
+        """Devuelve (path, filename, mime)."""
         job = self.jobs.get(job_id)
         if job is None:
             raise JobNotFound(f"Job {job_id} no existe")
@@ -132,7 +206,9 @@ class AudioService:
             raise FileNotFoundError("Aún no listo")
         if not job.file_path.exists():
             raise FileNotFoundError("Archivo expirado")
-        return job.file_path, job.filename or "audio.mp3"
+        kind, _ = _parse_format_key(job.format_key)
+        mime = "audio/mpeg" if kind == "audio" else "video/mp4"
+        return job.file_path, job.filename or job.file_path.name, mime
 
     def schedule_cleanup(self, job_id: str) -> BackgroundTask:
         return BackgroundTask(self._cleanup_after_download, job_id)
@@ -175,6 +251,7 @@ class AudioService:
 
     def _download_and_convert(self, job: Job, job_dir: Path) -> None:
         safe_title = _safe_filename(job.title)
+        kind, params = _parse_format_key(job.format_key)
         outtmpl = str(job_dir / f"{safe_title}.%(ext)s")
 
         def hook(d: dict) -> None:
@@ -185,37 +262,69 @@ class AudioService:
                 pct = (downloaded / total * 80.0) if total else 0.0
                 self._publish_sync(job, status="downloading", progress=pct, message="Descargando…")
             elif status == "finished":
-                self._publish_sync(job, status="converting", progress=85.0, message="Convirtiendo a MP3…")
+                msg = "Convirtiendo a MP3…" if kind == "audio" else "Procesando video…"
+                self._publish_sync(job, status="converting", progress=85.0, message=msg)
             elif status == "error":
                 self._publish_sync(job, status="error", message="Error de descarga.")
 
-        opts = {
+        base_opts: dict = {
             "quiet": True,
             "no_warnings": True,
             "outtmpl": outtmpl,
-            "format": "bestaudio/best",
             "noplaylist": True,
-            "max_filesize": 500 * 1024 * 1024,
+            "max_filesize": 2 * 1024 * 1024 * 1024,  # 2 GiB hard cap
             "progress_hooks": [hook],
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ],
         }
+
+        if kind == "audio":
+            opts = {
+                **base_opts,
+                "format": "bestaudio/best",
+                "postprocessors": [
+                    {
+                        "key": "FFmpegExtractAudio",
+                        "preferredcodec": "mp3",
+                        "preferredquality": params["bitrate"],
+                    }
+                ],
+            }
+            expected_ext = "mp3"
+        else:
+            height = params["height"]
+            fps = params["fps"]
+            # Pedimos el mejor video <=altura y fps deseados, mergeado con mejor audio.
+            # Si fps==60 yt-dlp aceptará 60 o cualquiera <=60; para 30 limitamos a <=30.
+            fps_filter = "" if fps == 60 else "[fps<=30]"
+            fmt = (
+                f"bestvideo[height<={height}][ext=mp4]{fps_filter}+bestaudio[ext=m4a]/"
+                f"bestvideo[height<={height}]{fps_filter}+bestaudio/"
+                f"best[height<={height}]"
+            )
+            opts = {
+                **base_opts,
+                "format": fmt,
+                "merge_output_format": "mp4",
+                "postprocessors": [
+                    {"key": "FFmpegVideoConvertor", "preferedformat": "mp4"},
+                ],
+            }
+            expected_ext = "mp4"
+
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 ydl.extract_info(job.url, download=True)
         except yt_dlp.utils.DownloadError as exc:
-            raise ConversionError("No se pudo descargar el audio.") from exc
+            raise ConversionError("No se pudo descargar el media.") from exc
 
-        mp3 = next(job_dir.glob("*.mp3"), None)
-        if mp3 is None:
-            raise ConversionError("La conversión no produjo MP3.")
-        job.file_path = mp3
-        job.filename = f"{safe_title}.mp3"
+        final = next(job_dir.glob(f"*.{expected_ext}"), None)
+        if final is None:
+            # fallback: cualquier archivo grande en el dir
+            files = sorted(job_dir.iterdir(), key=lambda p: p.stat().st_size, reverse=True)
+            final = files[0] if files else None
+        if final is None:
+            raise ConversionError("La conversión no produjo archivo final.")
+        job.file_path = final
+        job.filename = f"{safe_title}.{final.suffix.lstrip('.')}"
         self._publish_sync(job, status="done", progress=100.0, message="Listo para descargar.")
 
     def _snapshot(self, job: Job) -> dict:
@@ -228,6 +337,7 @@ class AudioService:
             "thumbnail": job.thumbnail,
             "duration": job.duration,
             "filename": job.filename,
+            "format_key": job.format_key,
         }
 
     def _publish_sync(self, job: Job, *, status: str, progress: float | None = None, message: str = "") -> None:
@@ -236,7 +346,6 @@ class AudioService:
         self._loop.call_soon_threadsafe(self._publish_threadsafe, job, status, progress, message)
 
     def _publish_threadsafe(self, job: Job, status: str, progress: float | None, message: str) -> None:
-        # Dedup: si nada cambió, no spameamos a los subscriptores.
         prev = (job.status, round(job.progress, 1), job.message)
         job.status = status
         if progress is not None:

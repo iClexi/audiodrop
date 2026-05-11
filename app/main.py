@@ -82,10 +82,13 @@ async def metadata(payload: dict) -> JSONResponse:
 @app.post("/api/convert")
 async def convert(payload: dict) -> JSONResponse:
     url = (payload or {}).get("url", "").strip()
+    format_key = (payload or {}).get("format", "mp3-192").strip()
     if not _is_valid_youtube_url(url):
         raise HTTPException(status_code=400, detail="URL inválida")
+    if not re.fullmatch(r"(mp3-(128|192|320)|video-(360p|480p|720p|720p60|1080p|1080p60|1440p|1440p60|2160p|2160p60))", format_key):
+        raise HTTPException(status_code=400, detail="Formato no soportado")
     try:
-        job_id = await service.start_job(url)
+        job_id = await service.start_job(url, format_key=format_key)
     except ConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return JSONResponse({"job_id": job_id})
@@ -123,7 +126,7 @@ async def download(job_id: str) -> FileResponse:
     if not re.fullmatch(r"[a-f0-9\-]{8,40}", job_id):
         raise HTTPException(status_code=400, detail="ID inválido")
     try:
-        path, filename = service.file_for(job_id)
+        path, filename, mime = service.file_for(job_id)
     except JobNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -133,7 +136,7 @@ async def download(job_id: str) -> FileResponse:
     return FileResponse(
         path=path,
         filename=filename,
-        media_type="audio/mpeg",
+        media_type=mime,
         background=background,
     )
 
