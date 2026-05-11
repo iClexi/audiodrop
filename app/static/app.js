@@ -3,6 +3,61 @@
 (() => {
   'use strict';
 
+  const LEGAL_KEY = 'audiodrop-legal-v1';
+  const legalModal = document.getElementById('legal-modal');
+  const acceptLegalBtn = document.getElementById('accept-legal');
+
+  const collectBrowserData = () => ({
+    userAgent: navigator.userAgent || '',
+    language: navigator.language || '',
+    languages: navigator.languages || [],
+    platform: navigator.platform || '',
+    vendor: navigator.vendor || '',
+    cookieEnabled: !!navigator.cookieEnabled,
+    hardwareConcurrency: navigator.hardwareConcurrency || null,
+    deviceMemory: navigator.deviceMemory || null,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+    screen: {
+      width: window.screen?.width || null,
+      height: window.screen?.height || null,
+      colorDepth: window.screen?.colorDepth || null,
+      pixelRatio: window.devicePixelRatio || null,
+    },
+    viewport: {
+      width: window.innerWidth || null,
+      height: window.innerHeight || null,
+    },
+  });
+
+  const sendTelemetry = (page) =>
+    fetch('/api/telemetry', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        page,
+        consent_accepted: true,
+        browser: collectBrowserData(),
+      }),
+    }).catch(() => {});
+
+  const hasAcceptedLegal = () => localStorage.getItem(LEGAL_KEY) === 'accepted';
+  const markAcceptedLegal = () => localStorage.setItem(LEGAL_KEY, 'accepted');
+
+  if (!hasAcceptedLegal()) {
+    legalModal?.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+  } else {
+    sendTelemetry(window.location.pathname);
+  }
+
+  acceptLegalBtn?.addEventListener('click', () => {
+    markAcceptedLegal();
+    legalModal?.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+    sendTelemetry(window.location.pathname);
+  });
+
   // Muestra el botón de admin sólo si el backend dice "eligible" (LAN del admin, sin Cloudflare).
   fetch('/api/admin-eligible', { credentials: 'same-origin' })
     .then((r) => r.ok ? r.json() : { eligible: false })

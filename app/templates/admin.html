@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>AudioDrop · Admin</title>
+  <link rel="stylesheet" href="/static/style.css?v=3" />
+</head>
+<body>
+  <div class="aurora" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+    <span class="grid"></span>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="AudioDrop">
+      <span class="brand-name">AudioDrop Admin</span>
+    </a>
+    <span class="tag">interno</span>
+  </header>
+
+  <main class="shell">
+    <section class="card glass admin-grid">
+      <div class="admin-stats">
+        <article class="admin-stat">
+          <h2>Requests (24h)</h2>
+          <p id="requests-24h">0</p>
+        </article>
+        <article class="admin-stat">
+          <h2>Descargas (24h)</h2>
+          <p id="downloads-24h">0</p>
+        </article>
+      </div>
+
+      <section class="admin-blocker">
+        <h2>Bloquear IP</h2>
+        <form id="block-form" class="admin-form">
+          <input id="block-ip" type="text" placeholder="IP (ej. 203.0.113.10)" required />
+          <input id="block-reason" type="text" placeholder="Razón del bloqueo" required />
+          <button class="primary" type="submit">Bloquear</button>
+        </form>
+      </section>
+
+      <section class="admin-section">
+        <h2>IPs bloqueadas</h2>
+        <div class="admin-table-wrap">
+          <table class="admin-table" id="blocked-table">
+            <thead>
+              <tr>
+                <th>IP</th>
+                <th>Razón</th>
+                <th>Fecha</th>
+                <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-section">
+        <h2>Eventos recientes</h2>
+        <div class="admin-table-wrap">
+          <table class="admin-table" id="events-table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>IP</th>
+                <th>Ruta</th>
+                <th>Estado</th>
+                <th>Payload</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <a class="footer-link" href="/terminos">Términos</a>
+    <span class="muted">·</span>
+    <a class="footer-link" href="/privacidad">Privacidad</a>
+  </footer>
+
+  <script src="/static/admin.js?v=1" defer></script>
+</body>
+</html>

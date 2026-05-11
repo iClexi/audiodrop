@@ -7,6 +7,8 @@ APP_USER="${APP_USER:-infra}"
 APP_DIR="${APP_DIR:-/opt/audiodrop}"
 WORK_DIR="${WORK_DIR:-/tmp/audiodrop}"
 PORT="${AUDIODROP_PORT:-3400}"
+ADMIN_IP="${AUDIODROP_ADMIN_IP:-192.168.68.83}"
+DATABASE_URL="${AUDIODROP_DATABASE_URL:-}"
 
 if [[ $EUID -ne 0 ]]; then
   echo "Ejecuta este script con sudo." >&2
@@ -41,6 +43,8 @@ AUDIODROP_PORT=$PORT
 AUDIODROP_WORK_DIR=$WORK_DIR
 AUDIODROP_MAX_DURATION=1800
 AUDIODROP_LOG_LEVEL=INFO
+AUDIODROP_ADMIN_IP=$ADMIN_IP
+AUDIODROP_DATABASE_URL=$DATABASE_URL
 EOF
 chmod 640 /etc/audiodrop/audiodrop.env
 chown root:"$APP_USER" /etc/audiodrop/audiodrop.env

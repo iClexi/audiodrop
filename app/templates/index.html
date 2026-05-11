@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=2" />
+  <link rel="stylesheet" href="/static/style.css?v=3" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23a855f7'/%3E%3Cstop offset='1' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M11 11v10l8-5z' fill='white'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -19,6 +19,23 @@
     <span class="orb orb-3"></span>
     <span class="grid"></span>
   </div>
+
+  <section id="legal-modal" class="legal-modal hidden" role="dialog" aria-modal="true" aria-labelledby="legal-title">
+    <div class="legal-backdrop"></div>
+    <div class="legal-card glass">
+      <h2 id="legal-title">Antes de continuar</h2>
+      <p>
+        Para usar AudioDrop debes aceptar nuestros
+        <a href="/terminos" target="_blank" rel="noopener noreferrer">Términos y Condiciones</a>
+        y la
+        <a href="/privacidad" target="_blank" rel="noopener noreferrer">Política de Privacidad</a>.
+      </p>
+      <p class="muted">
+        Registramos eventos técnicos de uso, IP pública y descargas para seguridad, anti-abuso y operación del servicio.
+      </p>
+      <button id="accept-legal" type="button" class="primary">Aceptar y continuar</button>
+    </div>
+  </section>
 
   <a id="admin-link" class="admin-link hidden" href="/admin" aria-label="Panel admin">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
@@ -41,7 +58,10 @@
       </span>
       <span class="brand-name">AudioDrop</span>
     </a>
-    <span class="tag">beta</span>
+    <div class="topbar-actions">
+      <a class="ghost-link" href="/acortador">Acortador</a>
+      <span class="tag">beta</span>
+    </div>
   </header>
 
   <main class="shell">
@@ -148,8 +168,12 @@
     <span>Hecho con cariño</span>
     <span class="muted">·</span>
     <span class="muted">Tus archivos se borran solos cuando termina la descarga.</span>
+    <span class="muted">·</span>
+    <a class="footer-link" href="/terminos">Términos</a>
+    <span class="muted">·</span>
+    <a class="footer-link" href="/privacidad">Privacidad</a>
   </footer>
 
-  <script src="/static/app.js?v=2" defer></script>
+  <script src="/static/app.js?v=3" defer></script>
 </body>
 </html>

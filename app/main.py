@@ -1,9 +1,4 @@
-"""AudioDrop — FastAPI entrypoint.
-
-Convierte un video de YouTube en MP3 y lo entrega vía descarga directa.
-Mantén el archivo simple: este módulo sólo expone HTTP y delega el trabajo
-al módulo `audio_service`.
-"""
+"""AudioDrop — FastAPI entrypoint."""
 from __future__ import annotations
 
 import asyncio
@@ -11,19 +6,17 @@ import json
 import logging
 import os
 import re
+from ipaddress import ip_address
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import (
-    FileResponse,
-    HTMLResponse,
-    JSONResponse,
-    StreamingResponse,
-)
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from audio_service import AudioService, ConversionError, JobNotFound
+from audit_store import AuditStore
 
 LOG_LEVEL = os.environ.get("AUDIODROP_LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
@@ -35,12 +28,14 @@ log = logging.getLogger("audiodrop")
 BASE_DIR = Path(__file__).resolve().parent
 WORK_DIR = Path(os.environ.get("AUDIODROP_WORK_DIR", "/tmp/audiodrop"))
 MAX_DURATION = int(os.environ.get("AUDIODROP_MAX_DURATION", "1800"))  # 30 min
+ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.68.83")
 
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 service = AudioService(work_dir=WORK_DIR, max_duration=MAX_DURATION)
+audit_store = AuditStore(os.environ.get("AUDIODROP_DATABASE_URL"))
 
-app = FastAPI(title="AudioDrop", version="1.0.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="AudioDrop", version="1.1.0", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -57,39 +52,225 @@ def _is_valid_youtube_url(url: str) -> bool:
     return bool(YOUTUBE_RE.match(url.strip()))
 
 
+def _is_valid_target_url(url: str) -> bool:
+    if not url or len(url) > 2048:
+        return False
+    return bool(re.match(r"^https?://[^\s]+$", url.strip(), re.IGNORECASE))
+
+
+def _request_client_ip(request: Request) -> str:
+    xff = (request.headers.get("x-forwarded-for") or "").split(",")
+    if xff and xff[0].strip():
+        return xff[0].strip()
+    return request.client.host if request.client else ""
+
+
+def _request_public_ip(request: Request) -> str:
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
+    return _request_client_ip(request)
+
+
+def _request_meta(request: Request, *, event_type: str, status_code: int) -> dict[str, Any]:
+    return {
+        "event_type": event_type,
+        "method": request.method,
+        "path": request.url.path,
+        "query_string": request.url.query or "",
+        "status_code": status_code,
+        "client_ip": _request_client_ip(request),
+        "public_ip": _request_public_ip(request),
+        "user_agent": request.headers.get("user-agent", ""),
+        "referer": request.headers.get("referer", ""),
+        "request_host": request.headers.get("host", ""),
+        "request_scheme": request.url.scheme,
+    }
+
+
+def _is_admin_request(request: Request) -> bool:
+    # Si hay cabeceras de Cloudflare, no consideramos esta peticion "local admin".
+    if request.headers.get("cf-ray") or request.headers.get("cf-connecting-ip"):
+        return False
+    return _request_client_ip(request) == ADMIN_LAN_IP
+
+
+def _require_admin(request: Request) -> None:
+    if not _is_admin_request(request):
+        raise HTTPException(status_code=404, detail="No encontrado")
+
+
+@app.middleware("http")
+async def firewall_and_audit_middleware(request: Request, call_next):
+    path = request.url.path
+    client_ip = _request_client_ip(request)
+
+    if client_ip and await audit_store.is_ip_blocked(client_ip):
+        meta = _request_meta(request, event_type="blocked_request", status_code=403)
+        await audit_store.log_event(meta, payload={"reason": "ip_blocked"})
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Acceso denegado"}, status_code=403)
+        return HTMLResponse("<h1>403 - Acceso denegado</h1>", status_code=403)
+
+    try:
+        response = await call_next(request)
+    except Exception:
+        meta = _request_meta(request, event_type="server_error", status_code=500)
+        await audit_store.log_event(meta, payload={"error": "unhandled_exception"})
+        raise
+
+    if not path.startswith("/static/"):
+        event_type = "page_view" if request.method == "GET" and not path.startswith("/api/") else "api_request"
+        meta = _request_meta(request, event_type=event_type, status_code=response.status_code)
+        await audit_store.log_event(meta, payload={})
+    return response
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("index.html", {"request": request})
 
 
+@app.get("/acortador", response_class=HTMLResponse)
+async def shortener_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("shortener.html", {"request": request})
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_panel(request: Request) -> HTMLResponse:
+    _require_admin(request)
+    meta = _request_meta(request, event_type="admin_access", status_code=200)
+    await audit_store.log_event(meta, payload={"panel": "main"})
+    return templates.TemplateResponse("admin.html", {"request": request})
+
+
+@app.get("/terminos", response_class=HTMLResponse)
+async def terms_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("terms.html", {"request": request})
+
+
+@app.get("/privacidad", response_class=HTMLResponse)
+async def privacy_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("privacy.html", {"request": request})
+
+
 @app.get("/api/health")
 async def health() -> dict:
-    return {"status": "ok", "version": app.version}
-
-
-_ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.68.83")
+    return {"status": "ok", "version": app.version, "database_enabled": audit_store.enabled}
 
 
 @app.get("/api/admin-eligible")
 async def admin_eligible(request: Request) -> dict:
-    """Sólo true si la petición llegó directo por LAN (no via Cloudflare) desde la IP del admin.
+    return {"eligible": _is_admin_request(request)}
 
-    Mecánica de seguridad:
-      1) `cf-ray` o `cf-connecting-ip` presentes → viene por Cloudflare → no admin.
-      2) La IP claim es la primera del `X-Forwarded-For` (que pone Apache local). Si no hay
-         XFF, usamos la del socket. Sólo coincide con `_ADMIN_LAN_IP` cuando el cliente está
-         realmente en la LAN y resuelve via DNS local (split-horizon).
-    """
-    cf_headers = request.headers.get("cf-ray") or request.headers.get("cf-connecting-ip")
-    if cf_headers:
-        return {"eligible": False}
-    xff = (request.headers.get("x-forwarded-for") or "").split(",")
-    client_ip = xff[0].strip() if xff and xff[0].strip() else (request.client.host if request.client else "")
-    return {"eligible": client_ip == _ADMIN_LAN_IP}
+
+@app.post("/api/telemetry")
+async def browser_telemetry(request: Request, payload: dict) -> JSONResponse:
+    browser = (payload or {}).get("browser", {})
+    page = (payload or {}).get("page", "")
+    consent = bool((payload or {}).get("consent_accepted", False))
+    if len(page) > 200:
+        raise HTTPException(status_code=400, detail="Ruta inválida")
+
+    meta = _request_meta(request, event_type="browser_telemetry", status_code=201)
+    await audit_store.log_event(
+        meta,
+        payload={
+            "page": page,
+            "consent_accepted": consent,
+            "browser": browser if isinstance(browser, dict) else {},
+        },
+    )
+    return JSONResponse({"ok": True}, status_code=201)
+
+
+@app.post("/api/shortener/create")
+async def shortener_create(request: Request, payload: dict) -> JSONResponse:
+    if not audit_store.enabled:
+        raise HTTPException(status_code=503, detail="Base de datos no disponible.")
+    target_url = (payload or {}).get("url", "").strip()
+    if not _is_valid_target_url(target_url):
+        raise HTTPException(status_code=400, detail="URL inválida. Debe empezar con http:// o https://")
+    short = await audit_store.create_short_link(
+        target_url=target_url,
+        created_ip=_request_client_ip(request),
+        created_public_ip=_request_public_ip(request),
+        created_user_agent=request.headers.get("user-agent", ""),
+    )
+    code = short["code"]
+    meta = _request_meta(request, event_type="short_link_created", status_code=201)
+    await audit_store.log_event(meta, payload={"code": code, "target_url": target_url})
+    short_url = f"{request.url.scheme}://{request.headers.get('host', '')}/s/{code}"
+    return JSONResponse({"ok": True, "code": code, "short_url": short_url}, status_code=201)
+
+
+@app.get("/s/{code}")
+async def shortener_redirect(request: Request, code: str) -> RedirectResponse:
+    if not re.fullmatch(r"[A-Za-z0-9]{4,16}", code):
+        raise HTTPException(status_code=404, detail="Código inválido.")
+    row = await audit_store.get_short_link(code)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Enlace no encontrado.")
+    await audit_store.register_short_click(
+        code=code,
+        client_ip=_request_client_ip(request),
+        public_ip=_request_public_ip(request),
+        user_agent=request.headers.get("user-agent", ""),
+        referer=request.headers.get("referer", ""),
+    )
+    meta = _request_meta(request, event_type="short_link_redirect", status_code=307)
+    await audit_store.log_event(meta, payload={"code": code, "target_url": row["target_url"]})
+    return RedirectResponse(url=row["target_url"], status_code=307)
+
+
+@app.get("/api/admin/overview")
+async def admin_overview(request: Request) -> JSONResponse:
+    _require_admin(request)
+    data = await audit_store.get_overview(limit=250)
+    return JSONResponse(data)
+
+
+@app.post("/api/admin/block-ip")
+async def admin_block_ip(request: Request, payload: dict) -> JSONResponse:
+    _require_admin(request)
+    ip_raw = ((payload or {}).get("ip") or "").strip()
+    reason = ((payload or {}).get("reason") or "Bloqueo manual desde panel admin").strip()
+    if not ip_raw:
+        raise HTTPException(status_code=400, detail="Falta IP.")
+    try:
+        normalized_ip = str(ip_address(ip_raw))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="IP inválida.") from exc
+    if normalized_ip == ADMIN_LAN_IP:
+        raise HTTPException(status_code=400, detail="No puedes bloquear tu IP de administrador.")
+    blocked_by = _request_client_ip(request) or "admin"
+    await audit_store.block_ip(normalized_ip, reason, blocked_by)
+
+    meta = _request_meta(request, event_type="admin_block_ip", status_code=201)
+    await audit_store.log_event(meta, payload={"target_ip": normalized_ip, "reason": reason})
+    return JSONResponse({"ok": True}, status_code=201)
+
+
+@app.post("/api/admin/unblock-ip")
+async def admin_unblock_ip(request: Request, payload: dict) -> JSONResponse:
+    _require_admin(request)
+    ip_raw = ((payload or {}).get("ip") or "").strip()
+    if not ip_raw:
+        raise HTTPException(status_code=400, detail="Falta IP.")
+    try:
+        normalized_ip = str(ip_address(ip_raw))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="IP inválida.") from exc
+    removed = await audit_store.unblock_ip(normalized_ip)
+    if not removed:
+        raise HTTPException(status_code=404, detail="IP no estaba bloqueada.")
+    meta = _request_meta(request, event_type="admin_unblock_ip", status_code=200)
+    await audit_store.log_event(meta, payload={"target_ip": normalized_ip})
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/metadata")
-async def metadata(payload: dict) -> JSONResponse:
+async def metadata(request: Request, payload: dict) -> JSONResponse:
     url = (payload or {}).get("url", "").strip()
     if not _is_valid_youtube_url(url):
         raise HTTPException(status_code=400, detail="URL inválida")
@@ -97,21 +278,28 @@ async def metadata(payload: dict) -> JSONResponse:
         info = await service.fetch_metadata(url)
     except ConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    meta = _request_meta(request, event_type="metadata", status_code=200)
+    await audit_store.log_event(meta, payload={"url": url})
     return JSONResponse(info)
 
 
 @app.post("/api/convert")
-async def convert(payload: dict) -> JSONResponse:
+async def convert(request: Request, payload: dict) -> JSONResponse:
     url = (payload or {}).get("url", "").strip()
     format_key = (payload or {}).get("format", "mp3-192").strip()
     if not _is_valid_youtube_url(url):
         raise HTTPException(status_code=400, detail="URL inválida")
-    if not re.fullmatch(r"(mp3-(128|192|320)|video-(360p|480p|720p|720p60|1080p|1080p60|1440p|1440p60|2160p|2160p60))", format_key):
+    if not re.fullmatch(
+        r"(mp3-(128|192|320)|video-(360p|480p|720p|720p60|1080p|1080p60|1440p|1440p60|2160p|2160p60))",
+        format_key,
+    ):
         raise HTTPException(status_code=400, detail="Formato no soportado")
     try:
         job_id = await service.start_job(url, format_key=format_key)
     except ConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    meta = _request_meta(request, event_type="convert", status_code=202)
+    await audit_store.log_event(meta, payload={"job_id": job_id, "url": url, "format_key": format_key})
     return JSONResponse({"job_id": job_id})
 
 
@@ -143,7 +331,7 @@ async def progress(job_id: str) -> StreamingResponse:
 
 
 @app.get("/api/download/{job_id}")
-async def download(job_id: str) -> FileResponse:
+async def download(request: Request, job_id: str) -> FileResponse:
     if not re.fullmatch(r"[a-f0-9\-]{8,40}", job_id):
         raise HTTPException(status_code=400, detail="ID inválido")
     try:
@@ -152,6 +340,19 @@ async def download(job_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=410, detail="Archivo expirado") from exc
+
+    job = service.jobs.get(job_id)
+    meta = _request_meta(request, event_type="download", status_code=200)
+    await audit_store.log_event(
+        meta,
+        payload={
+            "job_id": job_id,
+            "url": job.url if job else "",
+            "title": job.title if job else "",
+            "format_key": job.format_key if job else "",
+            "filename": filename,
+        },
+    )
 
     background = service.schedule_cleanup(job_id)
     return FileResponse(
@@ -164,8 +365,14 @@ async def download(job_id: str) -> FileResponse:
 
 @app.on_event("startup")
 async def on_startup() -> None:
+    await audit_store.init_schema()
     asyncio.create_task(service.janitor_loop())
-    log.info("AudioDrop listo — work_dir=%s max_duration=%ss", WORK_DIR, MAX_DURATION)
+    log.info(
+        "AudioDrop listo — work_dir=%s max_duration=%ss db_enabled=%s",
+        WORK_DIR,
+        MAX_DURATION,
+        audit_store.enabled,
+    )
 
 
 @app.on_event("shutdown")

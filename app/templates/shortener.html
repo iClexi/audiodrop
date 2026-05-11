@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>AudioDrop · Acortador de Links</title>
+  <link rel="stylesheet" href="/static/style.css?v=3" />
+</head>
+<body>
+  <div class="aurora" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+    <span class="grid"></span>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="AudioDrop">
+      <span class="brand-name">AudioDrop</span>
+    </a>
+    <span class="tag">acortador</span>
+  </header>
+
+  <main class="shell">
+    <section class="hero">
+      <h1 class="title">Acorta tus <span class="grad">links</span> en segundos.</h1>
+      <p class="subtitle">Genera enlaces cortos, limpios y listos para compartir.</p>
+
+      <section class="card glass">
+        <form id="shortener-form" class="shortener-form" novalidate>
+          <label class="sr-only" for="target-url">URL larga</label>
+          <input id="target-url" type="url" placeholder="https://tu-enlace-largo.com/ruta" required />
+          <button id="shorten-btn" class="primary" type="submit">Crear enlace corto</button>
+        </form>
+        <p id="shortener-hint" class="hint" role="status" aria-live="polite"></p>
+
+        <div id="shortener-result" class="shortener-result hidden">
+          <label for="short-url">Tu enlace corto</label>
+          <div class="shortener-row">
+            <input id="short-url" readonly />
+            <button id="copy-short-url" class="ghost" type="button">Copiar</button>
+          </div>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <a class="footer-link" href="/">Conversor YouTube</a>
+    <span class="muted">·</span>
+    <a class="footer-link" href="/terminos">Términos</a>
+    <span class="muted">·</span>
+    <a class="footer-link" href="/privacidad">Privacidad</a>
+  </footer>
+
+  <script src="/static/shortener.js?v=1" defer></script>
+</body>
+</html>

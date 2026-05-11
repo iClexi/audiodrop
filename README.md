@@ -26,7 +26,7 @@ con selector de calidad. Backend en Python con **FastAPI**, descargas con **yt-d
 - Elige **Audio** o **Video** y escoge la calidad disponible.
 - Pulsa convertir → progreso en tiempo real (Server-Sent Events).
 - Descarga el archivo → lo borramos del servidor a los pocos segundos.
-- Sin cuentas, sin trackers, sin pasos extra.
+- Sin fricción para el usuario final, con controles de seguridad para operación.
 
 ## Características
 
@@ -41,6 +41,13 @@ con selector de calidad. Backend en Python con **FastAPI**, descargas con **yt-d
 - 📱 Responsive total — móvil y escritorio (probado iPhone 13 Pro e iPad).
 - 🪟 UI premium tipo SaaS: dark mode, glassmorphism, blur, gradients.
 - 🛡️ Servicio aislado en systemd con hardening básico (no root, `ProtectSystem=strict`, `MemoryMax=600M`).
+- 🧭 Panel admin interno (`/admin`) con:
+  - monitoreo de tráfico,
+  - registro de descargas y eventos,
+  - bloqueo/desbloqueo de IP en caliente.
+- 🔗 Acortador de enlaces público (`/acortador`) con redirección corta (`/s/{code}`).
+- 🗃️ Auditoría en PostgreSQL (`AUDIODROP_DATABASE_URL`).
+- 📜 Popup legal + páginas de Términos y Privacidad.
 
 ## Stack
 
@@ -82,7 +89,17 @@ audiodrop-work/
 | Método | Ruta                          | Descripción                                  |
 |--------|-------------------------------|----------------------------------------------|
 | GET    | `/`                           | UI principal                                 |
+| GET    | `/admin`                      | Panel admin (sólo red local admin)          |
+| GET    | `/acortador`                 | UI pública para crear enlaces cortos        |
+| GET    | `/terminos`                   | Página de términos y condiciones            |
+| GET    | `/privacidad`                 | Política de privacidad                       |
 | GET    | `/api/health`                 | Healthcheck                                  |
+| POST   | `/api/telemetry`              | Telemetría de navegador (consentida)         |
+| POST   | `/api/shortener/create`       | Crea un enlace corto                         |
+| GET    | `/s/{code}`                   | Redirecciona al enlace original              |
+| GET    | `/api/admin/overview`         | Resumen y eventos para el panel admin        |
+| POST   | `/api/admin/block-ip`         | Bloquear IP                                  |
+| POST   | `/api/admin/unblock-ip`       | Desbloquear IP                               |
 | POST   | `/api/metadata`               | Título, thumbnail, duración + `audio_options` y `video_options` disponibles |
 | POST   | `/api/convert`                | Lanza el job. Body: `{url, format}` donde `format` ∈ `mp3-128 \| mp3-192 \| mp3-320 \| video-<height>[60]` |
 | GET    | `/api/progress/{job_id}`      | Stream SSE con el progreso                   |
@@ -175,6 +192,8 @@ si usas un patrón socat → VIP HA).
 | `AUDIODROP_WORK_DIR`      | `/tmp/audiodrop`   | Directorio para descargas temporales.           |
 | `AUDIODROP_MAX_DURATION`  | `1800`             | Duración máxima permitida del video (segundos). |
 | `AUDIODROP_LOG_LEVEL`     | `INFO`             | Nivel de logs.                                  |
+| `AUDIODROP_ADMIN_IP`      | `192.168.68.83`    | IP LAN autorizada para panel admin.             |
+| `AUDIODROP_DATABASE_URL`  | *(vacío)*          | DSN PostgreSQL para auditoría y bloqueo IP.     |
 
 ## Performance
 
