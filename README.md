@@ -45,7 +45,6 @@ con selector de calidad. Backend en Python con **FastAPI**, descargas con **yt-d
   - monitoreo de tráfico,
   - registro de descargas y eventos,
   - bloqueo/desbloqueo de IP en caliente.
-- 🔗 Acortador de enlaces público (`/acortador`) con redirección corta (`/s/{code}`).
 - 🗃️ Auditoría en PostgreSQL (`AUDIODROP_DATABASE_URL`).
 - 📜 Popup legal + páginas de Términos y Privacidad.
 
@@ -90,13 +89,10 @@ audiodrop-work/
 |--------|-------------------------------|----------------------------------------------|
 | GET    | `/`                           | UI principal                                 |
 | GET    | `/admin`                      | Panel admin (sólo red local admin)          |
-| GET    | `/acortador`                 | UI pública para crear enlaces cortos        |
 | GET    | `/terminos`                   | Página de términos y condiciones            |
 | GET    | `/privacidad`                 | Política de privacidad                       |
 | GET    | `/api/health`                 | Healthcheck                                  |
 | POST   | `/api/telemetry`              | Telemetría de navegador (consentida)         |
-| POST   | `/api/shortener/create`       | Crea un enlace corto                         |
-| GET    | `/s/{code}`                   | Redirecciona al enlace original              |
 | GET    | `/api/admin/overview`         | Resumen y eventos para el panel admin        |
 | POST   | `/api/admin/block-ip`         | Bloquear IP                                  |
 | POST   | `/api/admin/unblock-ip`       | Desbloquear IP                               |

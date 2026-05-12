@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>AudioDrop · Política de Privacidad</title>
   <link rel="stylesheet" href="/static/style.css?v=3" />
+  {% include "sentry.html" %}
 </head>
 <body>
   <div class="aurora" aria-hidden="true">
@@ -19,40 +20,75 @@
       <h1>Política de Privacidad</h1>
       <p class="muted">Última actualización: 2026-05-11</p>
 
-      <h2>1. Datos que recopilamos</h2>
+      <h2>1. Responsable del tratamiento</h2>
+      <p>
+        AudioDrop es operado por su administrador técnico. Esta política describe qué datos se tratan,
+        con qué finalidad y bajo qué medidas de seguridad.
+      </p>
+
+      <h2>2. Datos que recopilamos</h2>
       <p>
         Para operación, seguridad y auditoría, podemos almacenar: IP pública, ruta solicitada,
         método HTTP, estado de respuesta, user-agent, referer, host, datos de telemetría del navegador
         (idioma, plataforma, tamaño de pantalla, zona horaria, etc.) y eventos de descarga.
       </p>
 
-      <h2>2. Finalidad</h2>
+      <h2>3. Base jurídica y finalidades</h2>
       <p>
-        Usamos estos datos para analítica operativa, diagnóstico técnico, prevención de abuso,
-        bloqueo de IPs maliciosas y mejora del servicio.
+        Tratamos estos datos por interés legítimo en seguridad, continuidad operativa y prevención de abuso,
+        y por consentimiento cuando el usuario acepta los términos mostrados al iniciar.
+        Las finalidades incluyen analítica operativa, diagnóstico técnico, monitoreo, trazabilidad de incidentes,
+        cumplimiento normativo y defensa frente a actividades maliciosas.
       </p>
 
-      <h2>3. Almacenamiento</h2>
+      <h2>4. Almacenamiento y seguridad</h2>
       <p>
         Los registros se almacenan en PostgreSQL bajo controles de acceso administrativos.
-        No se publican ni se comparten con terceros para fines comerciales.
+        Aplicamos medidas razonables de seguridad (control de acceso, segmentación de red, registros de auditoría
+        y hardening de servicios). No comercializamos datos personales.
       </p>
 
-      <h2>4. Retención</h2>
+      <h2>5. Compartición de datos</h2>
+      <p>
+        No compartimos datos con terceros para fines comerciales. Podrían compartirse únicamente cuando exista
+        obligación legal, requerimiento de autoridad competente, investigación de fraude/abuso o para proteger
+        derechos e intereses legítimos del operador.
+      </p>
+
+      <h2>6. Retención</h2>
       <p>
         Los datos de auditoría se retienen por el tiempo necesario para seguridad y operación del sistema,
         o según requerimientos legales aplicables.
       </p>
 
-      <h2>5. Derechos y contacto</h2>
+      <h2>7. Cookies y almacenamiento local</h2>
       <p>
-        Si necesitas solicitar revisión o eliminación de datos asociados a tu IP, contacta al administrador
-        del servicio.
+        AudioDrop puede usar almacenamiento local del navegador (por ejemplo, localStorage) para registrar
+        aceptación de términos y mejorar la experiencia. No usamos este mecanismo para publicidad conductual.
       </p>
 
-      <h2>6. Cambios de política</h2>
+      <h2>8. Menores de edad</h2>
       <p>
-        Esta política puede actualizarse para reflejar cambios técnicos o legales.
+        El servicio no está dirigido a menores de edad sin supervisión de sus representantes legales.
+        Si detectamos uso no autorizado de datos de menores, podremos limitar o eliminar el acceso.
+      </p>
+
+      <h2>9. Transferencias internacionales</h2>
+      <p>
+        Dependiendo de la infraestructura o proveedores de conectividad, ciertos datos técnicos pueden transitar
+        por jurisdicciones distintas. En esos casos se aplicarán salvaguardas razonables según la normativa aplicable.
+      </p>
+
+      <h2>10. Derechos y contacto</h2>
+      <p>
+        Si necesitas solicitar revisión o eliminación de datos asociados a tu IP, contacta al administrador
+        del servicio. Evaluaremos solicitudes de acceso, corrección o supresión dentro de lo legalmente procedente.
+      </p>
+
+      <h2>11. Cambios de política</h2>
+      <p>
+        Esta política puede actualizarse para reflejar cambios técnicos, operativos o legales.
+        La versión vigente será la publicada en esta misma página.
       </p>
 
       <p><a class="footer-link" href="/">Volver a AudioDrop</a></p>

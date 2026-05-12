@@ -352,34 +352,6 @@ button { font-family: inherit; cursor: pointer; border: 0; }
   white-space: nowrap;
 }
 
-/* ---------------- shortener ---------------- */
-.shortener-form {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: 1fr auto;
-}
-.shortener-form input,
-.shortener-row input {
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  color: var(--text);
-  padding: 12px;
-  font-size: 14px;
-  width: 100%;
-}
-.shortener-result {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.shortener-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-}
-
 /* ---------------- responsive ---------------- */
 @media (max-width: 640px) {
   .topbar { padding: 18px 18px; }
@@ -394,8 +366,6 @@ button { font-family: inherit; cursor: pointer; border: 0; }
   .actions .primary { font-size: 15px; }
   .admin-form { grid-template-columns: 1fr; }
   .admin-stats { grid-template-columns: 1fr; }
-  .shortener-form { grid-template-columns: 1fr; }
-  .shortener-row { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

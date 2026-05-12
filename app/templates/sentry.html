@@ -1,0 +1,12 @@
+{% if sentry_dsn %}
+<script src="https://browser.sentry-cdn.com/8.0.0/bundle.tracing.min.js" crossorigin="anonymous"></script>
+<script>
+  Sentry.init({
+    dsn: {{ sentry_dsn | tojson }},
+    environment: {{ sentry_environment | tojson }},
+    release: {{ sentry_release | tojson }},
+    tracesSampleRate: {{ sentry_traces_sample_rate }},
+    integrations: [Sentry.browserTracingIntegration()],
+  });
+</script>
+{% endif %}

@@ -11,9 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+import sentry_sdk
 
 from audio_service import AudioService, ConversionError, JobNotFound
 from audit_store import AuditStore
@@ -29,13 +30,37 @@ BASE_DIR = Path(__file__).resolve().parent
 WORK_DIR = Path(os.environ.get("AUDIODROP_WORK_DIR", "/tmp/audiodrop"))
 MAX_DURATION = int(os.environ.get("AUDIODROP_MAX_DURATION", "1800"))  # 30 min
 ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.68.83")
+SENTRY_DSN = os.environ.get("AUDIODROP_SENTRY_DSN", "").strip()
+SENTRY_ENVIRONMENT = os.environ.get("AUDIODROP_SENTRY_ENVIRONMENT", os.environ.get("AUDIODROP_ENV", "production"))
+
+
+def _sentry_traces_sample_rate() -> float:
+    raw_value = os.environ.get("AUDIODROP_SENTRY_TRACES_SAMPLE_RATE", "0.1")
+    try:
+        sample_rate = float(raw_value)
+    except ValueError:
+        sample_rate = 0.1
+    return max(0.0, min(1.0, sample_rate))
+
+
+SENTRY_TRACES_SAMPLE_RATE = _sentry_traces_sample_rate()
+SENTRY_RELEASE = os.environ.get("AUDIODROP_SENTRY_RELEASE", "").strip()
+
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=SENTRY_ENVIRONMENT,
+        release=SENTRY_RELEASE or None,
+        traces_sample_rate=SENTRY_TRACES_SAMPLE_RATE,
+        send_default_pii=False,
+    )
 
 WORK_DIR.mkdir(parents=True, exist_ok=True)
 
 service = AudioService(work_dir=WORK_DIR, max_duration=MAX_DURATION)
 audit_store = AuditStore(os.environ.get("AUDIODROP_DATABASE_URL"))
 
-app = FastAPI(title="AudioDrop", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="VideoDrop", version="1.1.0", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -50,12 +75,6 @@ def _is_valid_youtube_url(url: str) -> bool:
     if not url or len(url) > 512:
         return False
     return bool(YOUTUBE_RE.match(url.strip()))
-
-
-def _is_valid_target_url(url: str) -> bool:
-    if not url or len(url) > 2048:
-        return False
-    return bool(re.match(r"^https?://[^\s]+$", url.strip(), re.IGNORECASE))
 
 
 def _request_client_ip(request: Request) -> str:
@@ -100,6 +119,16 @@ def _require_admin(request: Request) -> None:
         raise HTTPException(status_code=404, detail="No encontrado")
 
 
+def _template_context(request: Request) -> dict[str, Any]:
+    return {
+        "request": request,
+        "sentry_dsn": SENTRY_DSN,
+        "sentry_environment": SENTRY_ENVIRONMENT,
+        "sentry_release": SENTRY_RELEASE,
+        "sentry_traces_sample_rate": SENTRY_TRACES_SAMPLE_RATE,
+    }
+
+
 @app.middleware("http")
 async def firewall_and_audit_middleware(request: Request, call_next):
     path = request.url.path
@@ -128,12 +157,7 @@ async def firewall_and_audit_middleware(request: Request, call_next):
 
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("index.html", {"request": request})
-
-
-@app.get("/acortador", response_class=HTMLResponse)
-async def shortener_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("shortener.html", {"request": request})
+    return templates.TemplateResponse("index.html", _template_context(request))
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -141,17 +165,17 @@ async def admin_panel(request: Request) -> HTMLResponse:
     _require_admin(request)
     meta = _request_meta(request, event_type="admin_access", status_code=200)
     await audit_store.log_event(meta, payload={"panel": "main"})
-    return templates.TemplateResponse("admin.html", {"request": request})
+    return templates.TemplateResponse("admin.html", _template_context(request))
 
 
 @app.get("/terminos", response_class=HTMLResponse)
 async def terms_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("terms.html", {"request": request})
+    return templates.TemplateResponse("terms.html", _template_context(request))
 
 
 @app.get("/privacidad", response_class=HTMLResponse)
 async def privacy_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse("privacy.html", {"request": request})
+    return templates.TemplateResponse("privacy.html", _template_context(request))
 
 
 @app.get("/api/health")
@@ -182,45 +206,6 @@ async def browser_telemetry(request: Request, payload: dict) -> JSONResponse:
         },
     )
     return JSONResponse({"ok": True}, status_code=201)
-
-
-@app.post("/api/shortener/create")
-async def shortener_create(request: Request, payload: dict) -> JSONResponse:
-    if not audit_store.enabled:
-        raise HTTPException(status_code=503, detail="Base de datos no disponible.")
-    target_url = (payload or {}).get("url", "").strip()
-    if not _is_valid_target_url(target_url):
-        raise HTTPException(status_code=400, detail="URL inválida. Debe empezar con http:// o https://")
-    short = await audit_store.create_short_link(
-        target_url=target_url,
-        created_ip=_request_client_ip(request),
-        created_public_ip=_request_public_ip(request),
-        created_user_agent=request.headers.get("user-agent", ""),
-    )
-    code = short["code"]
-    meta = _request_meta(request, event_type="short_link_created", status_code=201)
-    await audit_store.log_event(meta, payload={"code": code, "target_url": target_url})
-    short_url = f"{request.url.scheme}://{request.headers.get('host', '')}/s/{code}"
-    return JSONResponse({"ok": True, "code": code, "short_url": short_url}, status_code=201)
-
-
-@app.get("/s/{code}")
-async def shortener_redirect(request: Request, code: str) -> RedirectResponse:
-    if not re.fullmatch(r"[A-Za-z0-9]{4,16}", code):
-        raise HTTPException(status_code=404, detail="Código inválido.")
-    row = await audit_store.get_short_link(code)
-    if row is None:
-        raise HTTPException(status_code=404, detail="Enlace no encontrado.")
-    await audit_store.register_short_click(
-        code=code,
-        client_ip=_request_client_ip(request),
-        public_ip=_request_public_ip(request),
-        user_agent=request.headers.get("user-agent", ""),
-        referer=request.headers.get("referer", ""),
-    )
-    meta = _request_meta(request, event_type="short_link_redirect", status_code=307)
-    await audit_store.log_event(meta, payload={"code": code, "target_url": row["target_url"]})
-    return RedirectResponse(url=row["target_url"], status_code=307)
 
 
 @app.get("/api/admin/overview")
@@ -290,7 +275,7 @@ async def convert(request: Request, payload: dict) -> JSONResponse:
     if not _is_valid_youtube_url(url):
         raise HTTPException(status_code=400, detail="URL inválida")
     if not re.fullmatch(
-        r"(mp3-(128|192|320)|video-(360p|480p|720p|720p60|1080p|1080p60|1440p|1440p60|2160p|2160p60))",
+        r"(mp3-(128|192|320)|video-(360p|480p|720p|720p60|1080p|1080p60|1440p|1440p60|2160p|2160p60|4320p|4320p60))",
         format_key,
     ):
         raise HTTPException(status_code=400, detail="Formato no soportado")

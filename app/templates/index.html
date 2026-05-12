@@ -4,12 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0b14" />
-  <meta name="description" content="AudioDrop — descarga audio o video de YouTube con elegancia." />
-  <title>AudioDrop · YouTube a MP3 o MP4</title>
+  <meta name="description" content="VideoDrop: descargar video y audio en MP3 o MP4 online, rapido y sin complicaciones." />
+  <title>VideoDrop · Descargar video y audio MP3/MP4</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/style.css?v=3" />
+  {% include "sentry.html" %}
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23a855f7'/%3E%3Cstop offset='1' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M11 11v10l8-5z' fill='white'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -25,13 +26,10 @@
     <div class="legal-card glass">
       <h2 id="legal-title">Antes de continuar</h2>
       <p>
-        Para usar AudioDrop debes aceptar nuestros
+        Al continuar, aceptas nuestros
         <a href="/terminos" target="_blank" rel="noopener noreferrer">Términos y Condiciones</a>
         y la
         <a href="/privacidad" target="_blank" rel="noopener noreferrer">Política de Privacidad</a>.
-      </p>
-      <p class="muted">
-        Registramos eventos técnicos de uso, IP pública y descargas para seguridad, anti-abuso y operación del servicio.
       </p>
       <button id="accept-legal" type="button" class="primary">Aceptar y continuar</button>
     </div>
@@ -43,7 +41,7 @@
   </a>
 
   <header class="topbar">
-    <a class="brand" href="/" aria-label="AudioDrop">
+    <a class="brand" href="/" aria-label="VideoDrop">
       <span class="brand-mark" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
           <rect width="32" height="32" rx="9" fill="url(#bgrad)" />
@@ -56,10 +54,9 @@
           </defs>
         </svg>
       </span>
-      <span class="brand-name">AudioDrop</span>
+      <span class="brand-name">VideoDrop</span>
     </a>
     <div class="topbar-actions">
-      <a class="ghost-link" href="/acortador">Acortador</a>
       <span class="tag">beta</span>
     </div>
   </header>
@@ -67,10 +64,10 @@
   <main class="shell">
     <section class="hero">
       <h1 class="title">
-        YouTube a <span class="grad">MP3 o MP4</span><br/>en segundos.
+        Descargar video y audio en <span class="grad">MP3 o MP4</span>.
       </h1>
       <p class="subtitle">
-        Pega un enlace, elige el formato y la calidad. Lo descargamos limpio, listo para llevar.
+        VideoDrop convierte enlaces en descargas de alta calidad, rapido, limpio y sin complicaciones.
       </p>
 
       <form id="form" class="card glass" novalidate>
@@ -152,13 +149,7 @@
           <span class="feat-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
           </span>
-          <span>Hasta 1080p 60fps</span>
-        </li>
-        <li>
-          <span class="feat-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="3"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
-          </span>
-          <span>Responsive total</span>
+          <span>Hasta 8K 60fps</span>
         </li>
       </ul>
     </section>
@@ -174,6 +165,6 @@
     <a class="footer-link" href="/privacidad">Privacidad</a>
   </footer>
 
-  <script src="/static/app.js?v=3" defer></script>
+  <script src="/static/app.js?v=4" defer></script>
 </body>
 </html>

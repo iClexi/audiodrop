@@ -3,7 +3,7 @@
 (() => {
   'use strict';
 
-  const LEGAL_KEY = 'audiodrop-legal-v1';
+  const LEGAL_KEY = 'audiodrop-legal-v2';
   const legalModal = document.getElementById('legal-modal');
   const acceptLegalBtn = document.getElementById('accept-legal');
 

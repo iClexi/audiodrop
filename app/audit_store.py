@@ -4,8 +4,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import secrets
-import string
 from typing import Any
 
 import psycopg
@@ -63,29 +61,6 @@ class AuditStore:
             ON audit_events (event_type);
         CREATE INDEX IF NOT EXISTS idx_audit_events_client_ip
             ON audit_events (client_ip);
-
-        CREATE TABLE IF NOT EXISTS short_links (
-            code TEXT PRIMARY KEY,
-            target_url TEXT NOT NULL,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            created_ip TEXT,
-            created_public_ip TEXT,
-            created_user_agent TEXT,
-            clicks BIGINT NOT NULL DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS short_link_clicks (
-            id BIGSERIAL PRIMARY KEY,
-            code TEXT NOT NULL REFERENCES short_links(code) ON DELETE CASCADE,
-            clicked_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            client_ip TEXT,
-            public_ip TEXT,
-            user_agent TEXT,
-            referer TEXT
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_short_link_clicks_code
-            ON short_link_clicks (code);
         """
         try:
             with self._connect() as conn, conn.cursor() as cur:
@@ -250,98 +225,3 @@ class AuditStore:
                 "downloads_24h": int(summary_row[1] or 0),
             },
         }
-
-    async def create_short_link(
-        self,
-        *,
-        target_url: str,
-        created_ip: str,
-        created_public_ip: str,
-        created_user_agent: str,
-    ) -> dict[str, Any]:
-        if not self.enabled:
-            raise RuntimeError("Base de datos no configurada.")
-        return await asyncio.to_thread(
-            self._create_short_link_sync,
-            target_url,
-            created_ip,
-            created_public_ip,
-            created_user_agent,
-        )
-
-    def _create_short_link_sync(
-        self,
-        target_url: str,
-        created_ip: str,
-        created_public_ip: str,
-        created_user_agent: str,
-    ) -> dict[str, Any]:
-        alphabet = string.ascii_letters + string.digits
-        sql = """
-        INSERT INTO short_links (code, target_url, created_ip, created_public_ip, created_user_agent)
-        VALUES (%s, %s, %s, %s, %s);
-        """
-        with self._connect() as conn, conn.cursor() as cur:
-            for _ in range(12):
-                code = "".join(secrets.choice(alphabet) for _ in range(7))
-                try:
-                    cur.execute(sql, (code, target_url, created_ip, created_public_ip, created_user_agent))
-                    return {"code": code, "target_url": target_url}
-                except psycopg.errors.UniqueViolation:
-                    conn.rollback()
-                    continue
-        raise RuntimeError("No se pudo generar un código corto único.")
-
-    async def get_short_link(self, code: str) -> dict[str, Any] | None:
-        if not self.enabled:
-            return None
-        return await asyncio.to_thread(self._get_short_link_sync, code)
-
-    def _get_short_link_sync(self, code: str) -> dict[str, Any] | None:
-        sql = """
-        SELECT code, target_url, created_at, clicks
-        FROM short_links
-        WHERE code = %s
-        LIMIT 1;
-        """
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(sql, (code,))
-            row = cur.fetchone()
-        if row is None:
-            return None
-        return {
-            "code": row[0],
-            "target_url": row[1],
-            "created_at": row[2].isoformat() if row[2] else None,
-            "clicks": int(row[3] or 0),
-        }
-
-    async def register_short_click(
-        self,
-        *,
-        code: str,
-        client_ip: str,
-        public_ip: str,
-        user_agent: str,
-        referer: str,
-    ) -> None:
-        if not self.enabled:
-            return
-        await asyncio.to_thread(self._register_short_click_sync, code, client_ip, public_ip, user_agent, referer)
-
-    def _register_short_click_sync(
-        self,
-        code: str,
-        client_ip: str,
-        public_ip: str,
-        user_agent: str,
-        referer: str,
-    ) -> None:
-        insert_sql = """
-        INSERT INTO short_link_clicks (code, client_ip, public_ip, user_agent, referer)
-        VALUES (%s, %s, %s, %s, %s);
-        """
-        update_sql = "UPDATE short_links SET clicks = clicks + 1 WHERE code = %s;"
-        with self._connect() as conn, conn.cursor() as cur:
-            cur.execute(insert_sql, (code, client_ip, public_ip, user_agent, referer))
-            cur.execute(update_sql, (code,))

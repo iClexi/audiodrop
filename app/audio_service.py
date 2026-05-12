@@ -2,7 +2,7 @@
 
 Soporta dos modos:
 - audio: extrae MP3 a 128/192/320 kbps
-- video: descarga MP4 hasta 1080p (30 o 60 fps)
+- video: descarga MP4 hasta 8K (30 o 60 fps, cuando exista en origen)
 
 La capa HTTP nunca debería tocar yt-dlp ni el sistema de archivos directamente.
 """
@@ -50,6 +50,8 @@ AUDIO_OPTIONS = [
 # Resoluciones de video que ofrecemos cuando están disponibles. (height, fps, label, key)
 # fps=60 sólo se ofrece si el video tiene un formato real con fps>=50 a esa altura.
 VIDEO_QUALITIES = [
+    (4320, 60, "8K · 60 fps", "video-4320p60"),
+    (4320, 30, "8K", "video-4320p"),
     (2160, 60, "4K · 60 fps", "video-2160p60"),
     (2160, 30, "4K", "video-2160p"),
     (1440, 60, "1440p · 60 fps", "video-1440p60"),
