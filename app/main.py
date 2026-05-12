@@ -1,4 +1,4 @@
-"""AudioDrop — FastAPI entrypoint."""
+"""VideoDrop — FastAPI entrypoint."""
 from __future__ import annotations
 
 import asyncio
@@ -353,7 +353,7 @@ async def on_startup() -> None:
     await audit_store.init_schema()
     asyncio.create_task(service.janitor_loop())
     log.info(
-        "AudioDrop listo — work_dir=%s max_duration=%ss db_enabled=%s",
+        "VideoDrop listo — work_dir=%s max_duration=%ss db_enabled=%s",
         WORK_DIR,
         MAX_DURATION,
         audit_store.enabled,

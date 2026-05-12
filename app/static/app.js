@@ -1,9 +1,11 @@
-/* AudioDrop frontend — orquesta el DOM y habla con la API.
-   Soporta audio (MP3 128/192/320) y video (hasta 4K cuando esté disponible). */
+/* VideoDrop frontend — orquesta el DOM y habla con la API.
+   Soporta audio (MP3 128/192/320) y video (hasta 8K cuando esté disponible). */
 (() => {
   'use strict';
 
   const LEGAL_KEY = 'audiodrop-legal-v2';
+  const PREVIEW_CACHE_PREFIX = 'videodrop-preview-v1:';
+  const PREVIEW_CACHE_TTL = 30 * 60 * 1000;
   const legalModal = document.getElementById('legal-modal');
   const acceptLegalBtn = document.getElementById('accept-legal');
 
@@ -43,6 +45,38 @@
 
   const hasAcceptedLegal = () => localStorage.getItem(LEGAL_KEY) === 'accepted';
   const markAcceptedLegal = () => localStorage.setItem(LEGAL_KEY, 'accepted');
+
+  const previewCacheKey = (url) => `${PREVIEW_CACHE_PREFIX}${url}`;
+  const readPreviewCache = (url) => {
+    try {
+      const raw = localStorage.getItem(previewCacheKey(url));
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed.ts !== 'number' || !parsed.data) return null;
+      if (Date.now() - parsed.ts > PREVIEW_CACHE_TTL) return null;
+      return parsed.data;
+    } catch {
+      return null;
+    }
+  };
+  const writePreviewCache = (url, data) => {
+    try {
+      localStorage.setItem(previewCacheKey(url), JSON.stringify({ ts: Date.now(), data }));
+    } catch {
+      // Si el navegador bloquea almacenamiento, seguimos sin caché.
+    }
+  };
+
+  const formatApiError = (detail, fallback) => {
+    const msg = String(detail || '').trim();
+    if (!msg) return fallback;
+    if (/url inválida|url invalida/i.test(msg)) return 'Pega un enlace válido de YouTube.';
+    if (/privad/i.test(msg)) return 'Ese video es privado.';
+    if (/no está disponible|no esta disponible/i.test(msg)) return 'Ese video no está disponible.';
+    if (/demasiado largo/i.test(msg)) return msg;
+    if (/formato no soportado/i.test(msg)) return 'Ese formato todavía no está disponible para este video.';
+    return msg;
+  };
 
   if (!hasAcceptedLegal()) {
     legalModal?.classList.remove('hidden');
@@ -195,6 +229,7 @@
     state.meta = data;
     state.audioOptions = data.audio_options || [];
     state.videoOptions = data.video_options || [];
+    writePreviewCache(urlInput.value.trim(), data);
     preview.classList.remove('hidden');
     if (data.thumbnail) { thumb.src = data.thumbnail; thumb.alt = data.title || ''; }
     titleEl.textContent = data.title || 'Video';
@@ -214,7 +249,7 @@
       body: JSON.stringify({ url }),
     });
     const data = await safelyParse(res);
-    if (!res.ok) throw new Error(data.detail || 'No se pudo leer el video');
+    if (!res.ok) throw new Error(formatApiError(data.detail, 'No se pudo leer el video.'));
     return data;
   };
 
@@ -225,7 +260,7 @@
       body: JSON.stringify({ url, format }),
     });
     const data = await safelyParse(res);
-    if (!res.ok) throw new Error(data.detail || 'No se pudo iniciar la descarga');
+    if (!res.ok) throw new Error(formatApiError(data.detail, 'No se pudo iniciar la descarga.'));
     return data.job_id;
   };
 
@@ -269,10 +304,16 @@
     const url = urlInput.value.trim();
     if (!url) { resetPreview(); setHint(''); return; }
     if (!YOUTUBE_RE.test(url)) { resetPreview(); setHint('Esa URL no parece de YouTube.', 'error'); return; }
+    const cached = readPreviewCache(url);
+    if (cached) {
+      showPreview(cached);
+      setHint('Vista previa cargada desde caché.', 'success');
+      return;
+    }
     setHint('Leyendo video…');
     fetchMetadata(url)
       .then((data) => { showPreview(data); setHint('Elige formato y calidad.', 'success'); })
-      .catch((err) => { resetPreview(); setHint(err.message, 'error'); });
+      .catch((err) => { resetPreview(); setHint(err.message || 'No se pudo leer el video.', 'error'); });
   };
 
   urlInput.addEventListener('input', () => {

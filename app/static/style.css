@@ -1,4 +1,4 @@
-/* AudioDrop — tema oscuro premium, glassmorphism y movimiento sutil. */
+/* VideoDrop — tema oscuro premium, glassmorphism y movimiento sutil. */
 :root {
   --bg: #07070d;
   --bg-2: #0d0d18;
@@ -107,6 +107,25 @@ body {
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .subtitle { color: var(--text-soft); font-size: clamp(15px, 1.6vw, 17px); margin: 0 0 26px; max-width: 560px; line-height: 1.55; }
+.eyebrow {
+  margin: 0 0 8px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #c4b5fd;
+}
+.section-title {
+  margin: 0;
+  font-size: clamp(22px, 3.4vw, 32px);
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+}
+.section-copy {
+  margin: 10px 0 0;
+  color: var(--text-soft);
+  line-height: 1.65;
+}
 
 /* ---------------- glass cards ---------------- */
 .glass {
@@ -240,6 +259,38 @@ button { font-family: inherit; cursor: pointer; border: 0; }
 .features li { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-soft); background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
 .feat-icon { display: inline-grid; place-items: center; width: 18px; height: 18px; color: #c4b5fd; flex: 0 0 auto; }
 .feat-icon svg { width: 16px; height: 16px; display: block; }
+
+.seo-card,
+.faq-card { margin-top: 18px; }
+.seo-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr); gap: 18px; align-items: start; }
+.seo-points { display: grid; gap: 10px; }
+.seo-points article,
+.faq-list details {
+  background: rgba(0, 0, 0, 0.22);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px;
+}
+.seo-points h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+.seo-points p,
+.faq-list p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.55;
+}
+.faq-list { display: grid; gap: 10px; margin-top: 14px; }
+.faq-list summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+}
+.faq-list summary::-webkit-details-marker { display: none; }
+.faq-list details[open] summary { margin-bottom: 8px; }
 
 /* ---------------- admin link (sólo visible en LAN admin) ---------------- */
 .admin-link {
@@ -375,6 +426,7 @@ button { font-family: inherit; cursor: pointer; border: 0; }
   .title { margin-top: 8px; font-size: clamp(26px, 8.5vw, 36px); }
   .subtitle { font-size: 14.5px; }
   .features { grid-template-columns: repeat(2, 1fr); }
+  .seo-grid { grid-template-columns: 1fr; }
   .preview-top { grid-template-columns: 1fr; }
   .preview-thumb { aspect-ratio: 16 / 9; }
   .ghost { display: none; }

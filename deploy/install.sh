@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Instala AudioDrop en una VM Ubuntu/Debian.
+# Instala VideoDrop en una VM Ubuntu/Debian.
 # Uso: sudo bash deploy/install.sh
 set -euo pipefail
 
@@ -54,7 +54,7 @@ install -m 0644 "$SRC_DIR/deploy/audiodrop.service" /etc/systemd/system/audiodro
 systemctl daemon-reload
 systemctl enable --now audiodrop.service
 
-echo "==> AudioDrop arrancado en http://127.0.0.1:$PORT"
+echo "==> VideoDrop arrancado en http://127.0.0.1:$PORT"
 echo "==> Pon el vhost de Apache si quieres exponerlo:"
 echo "    sudo cp $SRC_DIR/deploy/006-audiodrop.conf /etc/apache2/sites-enabled/"
 echo "    sudo systemctl reload apache2"

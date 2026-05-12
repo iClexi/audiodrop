@@ -1,6 +1,6 @@
 <div align="center">
 
-# AudioDrop
+# VideoDrop
 
 ### YouTube → MP3 o MP4. Rápido, elegante y sin fricción.
 
@@ -18,7 +18,7 @@
 
 ## ¿Qué es esto?
 
-**AudioDrop** es una app web minimalista para descargar audio (**MP3**) o video (**MP4**) de YouTube,
+**VideoDrop** es una app web minimalista para descargar audio (**MP3**) o video (**MP4**) de YouTube,
 con selector de calidad. Backend en Python con **FastAPI**, descargas con **yt-dlp**, conversión con
 **ffmpeg**, frontend en HTML/CSS/JS puro con tema oscuro, glassmorphism y animaciones suaves.
 
