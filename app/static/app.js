@@ -10,6 +10,7 @@
   const acceptLegalBtn = document.getElementById('accept-legal');
   // allow forcing acceptance via query param ?_accept_legal=1 (for headless captures / dev)
   const FORCE_ACCEPT_LEGAL = new URLSearchParams(window.location.search).has('_accept_legal') || new URLSearchParams(window.location.search).get('accept_legal') === '1';
+  const captchaSiteKey = window.AUDIODROP_CAPTCHA_SITE_KEY || '';
 
   const collectBrowserData = () => ({
     userAgent: navigator.userAgent || '',
@@ -67,6 +68,21 @@
     } catch {
       // Si el navegador bloquea almacenamiento, seguimos sin caché.
     }
+  };
+
+  const getCaptchaToken = async (action) => {
+    if (!captchaSiteKey || !window.grecaptcha?.execute) return '';
+    try {
+      await new Promise((resolve) => window.grecaptcha.ready(resolve));
+      return await window.grecaptcha.execute(captchaSiteKey, { action });
+    } catch {
+      return '';
+    }
+  };
+
+  const withCaptcha = async (body, action) => {
+    const token = await getCaptchaToken(action);
+    return token ? { ...body, captcha_token: token } : body;
   };
 
   const formatApiError = (detail, fallback) => {
@@ -146,6 +162,9 @@
 
   let eventSource = null;
   let debounceId = null;
+  let transcriptRequestId = 0;
+  let activeTranscriptUrl = '';
+  let transcriptInFlight = false;
 
   const YOUTUBE_RE = /^(https?:\/\/)?((www|m|music)\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)[\w\-]{6,}/i;
 
@@ -172,6 +191,9 @@
   };
 
   const resetPreview = () => {
+    transcriptRequestId += 1;
+    activeTranscriptUrl = '';
+    transcriptInFlight = false;
     idlePanel?.classList.remove('hidden');
     preview.classList.add('hidden');
     preview.classList.remove('busy');
@@ -181,10 +203,15 @@
     downloadEl.classList.add('hidden');
     downloadEl.removeAttribute('href');
     transcribeBtn?.classList.add('hidden');
+    if (transcribeBtn) {
+      transcribeBtn.disabled = false;
+      transcribeBtn.textContent = 'Desgrabar texto';
+    }
     segmentPanel?.classList.add('hidden');
     transcriptPanel?.classList.add('hidden');
     if (transcriptText) transcriptText.textContent = '';
     if (transcriptMeta) transcriptMeta.textContent = '—';
+    if (copyTranscriptBtn) copyTranscriptBtn.disabled = true;
     submitBtn.classList.remove('hidden');
     badge.textContent = 'Listo';
     badge.className = 'badge';
@@ -293,6 +320,7 @@
     durationEl.textContent = formatDuration(data.duration);
     renderSegments();
     renderQualities();
+    loadTranscript(urlInput.value.trim(), { passive: true });
   };
 
   const safelyParse = async (res) => {
@@ -300,10 +328,11 @@
   };
 
   const fetchMetadata = async (url) => {
+    const body = await withCaptcha({ url }, 'metadata');
     const res = await fetch('/api/metadata', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(body),
     });
     const data = await safelyParse(res);
     if (!res.ok) throw new Error(formatApiError(data.detail, 'No se pudo leer el video.'));
@@ -315,10 +344,11 @@
     if (state.segmentIndex !== null && state.segmentIndex !== undefined) {
       body.segment_index = state.segmentIndex;
     }
+    const protectedBody = await withCaptcha(body, 'convert');
     const res = await fetch('/api/convert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(protectedBody),
     });
     const data = await safelyParse(res);
     if (!res.ok) throw new Error(formatApiError(data.detail, 'No se pudo iniciar la descarga.'));
@@ -343,14 +373,79 @@
   };
 
   const fetchTranscript = async (url) => {
+    const body = await withCaptcha({ url }, 'transcript');
     const res = await fetch('/api/transcript', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify(body),
     });
     const data = await safelyParse(res);
     if (!res.ok) throw new Error(formatApiError(data.detail, 'No se pudo extraer la transcripción.'));
     return data;
+  };
+
+  const sourceLabel = (source) => (
+    source === 'automatic_captions' ? 'captions automáticos' : 'subtítulos'
+  );
+
+  const renderTranscriptLoading = () => {
+    transcriptPanel?.classList.remove('hidden');
+    if (copyTranscriptBtn) copyTranscriptBtn.disabled = true;
+    if (transcriptMeta) transcriptMeta.textContent = 'Buscando captions disponibles…';
+    if (transcriptText) transcriptText.textContent = 'Preparando desgrabado del video…';
+    if (transcribeBtn) {
+      transcribeBtn.classList.remove('hidden');
+      transcribeBtn.disabled = true;
+      transcribeBtn.textContent = 'Desgrabando…';
+    }
+  };
+
+  const renderTranscriptResult = (data) => {
+    transcriptPanel?.classList.remove('hidden');
+    if (transcriptMeta) {
+      transcriptMeta.textContent = `${data.language || 'idioma desconocido'} · ${sourceLabel(data.source)} · ${data.characters || 0} caracteres`;
+    }
+    if (transcriptText) transcriptText.textContent = data.text || '';
+    if (copyTranscriptBtn) copyTranscriptBtn.disabled = !(data.text || '').trim();
+    if (transcribeBtn) {
+      transcribeBtn.disabled = false;
+      transcribeBtn.textContent = 'Actualizar texto';
+    }
+  };
+
+  const renderTranscriptError = (err) => {
+    transcriptPanel?.classList.remove('hidden');
+    if (copyTranscriptBtn) copyTranscriptBtn.disabled = true;
+    if (transcriptMeta) transcriptMeta.textContent = 'Texto no disponible';
+    if (transcriptText) {
+      transcriptText.textContent = err.message || 'Este video no expone subtítulos descargables.';
+    }
+    if (transcribeBtn) {
+      transcribeBtn.disabled = false;
+      transcribeBtn.textContent = 'Reintentar desgrabado';
+    }
+  };
+
+  const loadTranscript = async (url, { passive = false } = {}) => {
+    if (!YOUTUBE_RE.test(url)) return;
+    if (transcriptInFlight && activeTranscriptUrl === url) return;
+    const requestId = ++transcriptRequestId;
+    activeTranscriptUrl = url;
+    transcriptInFlight = true;
+    renderTranscriptLoading();
+    if (!passive) setHint('Buscando subtítulos disponibles…');
+    try {
+      const data = await fetchTranscript(url);
+      if (requestId !== transcriptRequestId) return;
+      renderTranscriptResult(data);
+      setHint(passive ? 'Preview y desgrabador listos.' : 'Transcripción lista.', 'success');
+    } catch (err) {
+      if (requestId !== transcriptRequestId) return;
+      renderTranscriptError(err);
+      if (!passive) setHint(err.message || 'No se pudo extraer la transcripción.', 'error');
+    } finally {
+      if (requestId === transcriptRequestId) transcriptInFlight = false;
+    }
   };
 
   const listenProgress = (jobId) => new Promise((resolve, reject) => {
@@ -427,21 +522,7 @@
   transcribeBtn?.addEventListener('click', async () => {
     const url = urlInput.value.trim();
     if (!YOUTUBE_RE.test(url)) { setHint('Esa URL no parece de YouTube.', 'error'); return; }
-    transcribeBtn.disabled = true;
-    transcribeBtn.textContent = 'Transcribiendo…';
-    setHint('Buscando subtítulos disponibles…');
-    try {
-      const data = await fetchTranscript(url);
-      transcriptPanel?.classList.remove('hidden');
-      transcriptMeta.textContent = `${data.language || 'idioma desconocido'} · ${data.source === 'automatic_captions' ? 'captions automáticos' : 'subtítulos'} · ${data.characters || 0} caracteres`;
-      transcriptText.textContent = data.text || '';
-      setHint('Transcripción lista.', 'success');
-    } catch (err) {
-      setHint(err.message || 'No se pudo extraer la transcripción.', 'error');
-    } finally {
-      transcribeBtn.disabled = false;
-      transcribeBtn.textContent = 'Transcribir texto';
-    }
+    loadTranscript(url, { passive: false });
   });
 
   copyTranscriptBtn?.addEventListener('click', async () => {

@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import re
+import urllib.parse
+import urllib.request
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
@@ -34,6 +36,18 @@ ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.68.83")
 ADMIN_ENTRY_SECRET = os.environ.get("AUDIODROP_ADMIN_ENTRY_SECRET", "").strip()
 SENTRY_DSN = os.environ.get("AUDIODROP_SENTRY_DSN", "").strip()
 SENTRY_ENVIRONMENT = os.environ.get("AUDIODROP_SENTRY_ENVIRONMENT", os.environ.get("AUDIODROP_ENV", "production"))
+RECAPTCHA_SITE_KEY = os.environ.get("AUDIODROP_RECAPTCHA_SITE_KEY", "").strip()
+RECAPTCHA_SECRET_KEY = os.environ.get("AUDIODROP_RECAPTCHA_SECRET_KEY", "").strip()
+
+
+def _float_env(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, str(default)))
+    except ValueError:
+        return default
+
+
+RECAPTCHA_SCORE_THRESHOLD = max(0.0, min(1.0, _float_env("AUDIODROP_RECAPTCHA_SCORE_THRESHOLD", 0.45)))
 
 
 def _sentry_traces_sample_rate() -> float:
@@ -62,7 +76,7 @@ WORK_DIR.mkdir(parents=True, exist_ok=True)
 service = AudioService(work_dir=WORK_DIR, max_duration=MAX_DURATION)
 audit_store = AuditStore(os.environ.get("AUDIODROP_DATABASE_URL"))
 
-app = FastAPI(title="VideoDrop", version="1.1.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="VideoDrop", version="1.2.0", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -128,7 +142,72 @@ def _template_context(request: Request) -> dict[str, Any]:
         "sentry_environment": SENTRY_ENVIRONMENT,
         "sentry_release": SENTRY_RELEASE,
         "sentry_traces_sample_rate": SENTRY_TRACES_SAMPLE_RATE,
+        "recaptcha_site_key": RECAPTCHA_SITE_KEY,
     }
+
+
+def _is_suspicious_request(request: Request) -> bool:
+    ua = (request.headers.get("user-agent") or "").lower()
+    if not ua:
+        return True
+    bad_tokens = (
+        "bot",
+        "crawler",
+        "spider",
+        "curl",
+        "wget",
+        "python-requests",
+        "httpx",
+        "go-http-client",
+        "headless",
+    )
+    if any(token in ua for token in bad_tokens):
+        return True
+    if request.url.path.startswith("/api/") and not request.headers.get("accept-language"):
+        return True
+    return False
+
+
+def _verify_recaptcha_sync(token: str, action: str) -> tuple[bool, dict[str, Any]]:
+    form = urllib.parse.urlencode({"secret": RECAPTCHA_SECRET_KEY, "response": token}).encode()
+    req = urllib.request.Request(
+        "https://www.google.com/recaptcha/api/siteverify",
+        data=form,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=6) as res:  # noqa: S310 - Google reCAPTCHA endpoint
+            data = json.loads(res.read(16 * 1024).decode("utf-8", errors="replace"))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("No se pudo verificar reCAPTCHA: %s", exc)
+        return False, {"error": "verification_failed"}
+    score = float(data.get("score") or 0.0)
+    returned_action = str(data.get("action") or "")
+    action_ok = not returned_action or returned_action == action
+    return bool(data.get("success")) and action_ok and score >= RECAPTCHA_SCORE_THRESHOLD, data
+
+
+async def _enforce_captcha_if_needed(request: Request, payload: dict, action: str) -> None:
+    if not RECAPTCHA_SECRET_KEY:
+        return
+    token = str((payload or {}).get("captcha_token") or "").strip()
+    if not token and not _is_suspicious_request(request):
+        return
+    if not token:
+        meta = _request_meta(request, event_type="captcha_required", status_code=403)
+        await audit_store.log_event(meta, payload={"action": action})
+        raise HTTPException(status_code=403, detail="Captcha requerido.")
+
+    ok, result = await asyncio.to_thread(_verify_recaptcha_sync, token, action)
+    if ok:
+        return
+    meta = _request_meta(request, event_type="captcha_failed", status_code=403)
+    await audit_store.log_event(
+        meta,
+        payload={"action": action, "score": result.get("score"), "errors": result.get("error-codes", [])},
+    )
+    raise HTTPException(status_code=403, detail="Captcha no válido.")
 
 
 @app.middleware("http")
@@ -271,11 +350,29 @@ async def admin_unblock_ip(request: Request, payload: dict) -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/admin/forget-client")
+async def admin_forget_client(request: Request, payload: dict) -> JSONResponse:
+    _require_admin(request)
+    ip_raw = ((payload or {}).get("ip") or "").strip()
+    user_agent = str((payload or {}).get("user_agent") or "").strip()
+    if not ip_raw or ip_raw == "unknown" or not user_agent:
+        raise HTTPException(status_code=400, detail="Faltan datos de la sesión.")
+    try:
+        normalized_ip = str(ip_address(ip_raw))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="IP inválida.") from exc
+    deleted = await audit_store.forget_client_events(normalized_ip, user_agent)
+    meta = _request_meta(request, event_type="admin_forget_client", status_code=200)
+    await audit_store.log_event(meta, payload={"target_ip": normalized_ip, "deleted_events": deleted})
+    return JSONResponse({"ok": True, "deleted_events": deleted})
+
+
 @app.post("/api/metadata")
 async def metadata(request: Request, payload: dict) -> JSONResponse:
     url = (payload or {}).get("url", "").strip()
     if not _is_valid_youtube_url(url):
         raise HTTPException(status_code=400, detail="URL inválida")
+    await _enforce_captcha_if_needed(request, payload, "metadata")
     try:
         info = await service.fetch_metadata(url)
     except ConversionError as exc:
@@ -291,6 +388,7 @@ async def transcript(request: Request, payload: dict) -> JSONResponse:
     language = (payload or {}).get("language", "").strip()[:12]
     if not _is_valid_youtube_url(url):
         raise HTTPException(status_code=400, detail="URL inválida")
+    await _enforce_captcha_if_needed(request, payload, "transcript")
     try:
         data = await service.fetch_transcript(url, preferred_language=language)
     except ConversionError as exc:
@@ -321,6 +419,7 @@ async def convert(request: Request, payload: dict) -> JSONResponse:
             raise HTTPException(status_code=400, detail="Parte inválida") from exc
     if not _is_valid_youtube_url(url):
         raise HTTPException(status_code=400, detail="URL inválida")
+    await _enforce_captcha_if_needed(request, payload, "convert")
     if not re.fullmatch(
         r"(mp3-(128|192|320)|video-(360p|480p|720p|720p60|1080p|1080p60|1440p|1440p60|2160p|2160p60|4320p|4320p60))",
         format_key,

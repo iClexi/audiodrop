@@ -135,6 +135,21 @@ class AuditStore:
             cur.execute(sql, (ip,))
             return cur.rowcount > 0
 
+    async def forget_client_events(self, ip: str, user_agent: str) -> int:
+        if not self.enabled:
+            raise RuntimeError("Base de datos no configurada.")
+        return await asyncio.to_thread(self._forget_client_events_sync, ip, user_agent)
+
+    def _forget_client_events_sync(self, ip: str, user_agent: str) -> int:
+        sql = """
+        DELETE FROM audit_events
+        WHERE COALESCE(NULLIF(public_ip, ''), NULLIF(client_ip, ''), 'unknown') = %s
+          AND COALESCE(NULLIF(user_agent, ''), 'unknown') = %s;
+        """
+        with self._connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, (ip, user_agent))
+            return int(cur.rowcount or 0)
+
     async def list_blocked_ips(self) -> list[dict[str, Any]]:
         if not self.enabled:
             return []
@@ -182,15 +197,31 @@ class AuditStore:
         FROM audit_events;
         """
         clients_sql = """
-        SELECT
-            COALESCE(NULLIF(public_ip, ''), NULLIF(client_ip, ''), 'unknown') AS ip,
-            COALESCE(NULLIF(user_agent, ''), 'unknown') AS user_agent,
-            MAX(created_at) AS last_seen,
-            COUNT(*) AS events_count,
-            MAX(path) AS last_path
-        FROM audit_events
-        WHERE created_at >= NOW() - INTERVAL '30 minutes'
-        GROUP BY 1, 2
+        WITH base AS (
+            SELECT
+                COALESCE(NULLIF(public_ip, ''), NULLIF(client_ip, ''), 'unknown') AS ip,
+                COALESCE(NULLIF(user_agent, ''), 'unknown') AS user_agent,
+                created_at,
+                path,
+                payload
+            FROM audit_events
+            WHERE created_at >= NOW() - INTERVAL '30 minutes'
+        ),
+        ranked AS (
+            SELECT
+                ip,
+                user_agent,
+                created_at,
+                path,
+                payload,
+                COUNT(*) OVER (PARTITION BY ip, user_agent) AS events_count,
+                MAX(created_at) OVER (PARTITION BY ip, user_agent) AS last_seen,
+                ROW_NUMBER() OVER (PARTITION BY ip, user_agent ORDER BY created_at DESC) AS rn
+            FROM base
+        )
+        SELECT ip, user_agent, last_seen, events_count, path, payload
+        FROM ranked
+        WHERE rn = 1
         ORDER BY last_seen DESC
         LIMIT 80;
         """
@@ -241,6 +272,7 @@ class AuditStore:
                 "last_seen": r[2].isoformat() if r[2] else None,
                 "events_count": int(r[3] or 0),
                 "last_path": r[4],
+                "payload": r[5] or {},
             }
             for r in client_rows
         ]

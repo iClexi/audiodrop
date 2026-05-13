@@ -27,6 +27,57 @@
     return d.toLocaleString();
   };
 
+  const browserSummary = (client) => {
+    const browser = client?.payload?.browser || {};
+    const parts = [
+      browser.platform,
+      browser.language,
+      browser.timezone,
+      browser.screen?.width && browser.screen?.height
+        ? `${browser.screen.width}x${browser.screen.height}`
+        : "",
+    ].filter(Boolean);
+    return parts.length ? parts.join(" · ") : "Sin telemetría de navegador";
+  };
+
+  const blockClient = async (ip) => {
+    if (!ip || ip === "unknown") {
+      alert("No hay IP válida para bloquear.");
+      return;
+    }
+    const res = await fetch("/api/admin/block-ip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip, reason: "Bloqueo desde sesiones recientes" }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.detail || "No se pudo bloquear la IP.");
+      return;
+    }
+    await refresh();
+  };
+
+  const forgetClient = async (ip, userAgent) => {
+    if (!ip || ip === "unknown" || !userAgent) {
+      alert("No hay datos suficientes para borrar esta sesión.");
+      return;
+    }
+    const ok = window.confirm("Borrar los eventos recientes de esta sesión del panel?");
+    if (!ok) return;
+    const res = await fetch("/api/admin/forget-client", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ip, user_agent: userAgent }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      alert(data.detail || "No se pudo borrar la sesión.");
+      return;
+    }
+    await refresh();
+  };
+
   const renderBlocked = (rows) => {
     if (!blockedBody) return;
     blockedBody.innerHTML = "";
@@ -88,7 +139,7 @@
     if (!clientsBody) return;
     clientsBody.innerHTML = "";
     if (!rows.length) {
-      clientsBody.innerHTML = `<tr><td colspan="5" class="muted">Sin sesiones recientes.</td></tr>`;
+      clientsBody.innerHTML = `<tr><td colspan="6" class="muted">Sin sesiones recientes.</td></tr>`;
       return;
     }
     for (const client of rows) {
@@ -96,10 +147,21 @@
       tr.innerHTML = `
         <td>${escapeHtml(fmtDate(client.last_seen))}</td>
         <td><code>${escapeHtml(client.ip || "")}</code></td>
-        <td class="payload-cell" title="${escapeHtml(client.user_agent || "")}">${escapeHtml(client.user_agent || "")}</td>
+        <td class="payload-cell client-device" title="${escapeHtml(client.user_agent || "")}">
+          <strong>${escapeHtml(browserSummary(client))}</strong>
+          <small>${escapeHtml(client.user_agent || "")}</small>
+        </td>
         <td>${escapeHtml(client.events_count ?? 0)}</td>
         <td>${escapeHtml(client.last_path || "")}</td>
+        <td>
+          <div class="client-actions">
+            <button class="ghost block-client" type="button">Bloquear</button>
+            <button class="ghost forget-client" type="button">Olvidar</button>
+          </div>
+        </td>
       `;
+      tr.querySelector(".block-client")?.addEventListener("click", () => blockClient(client.ip || ""));
+      tr.querySelector(".forget-client")?.addEventListener("click", () => forgetClient(client.ip || "", client.user_agent || ""));
       clientsBody.appendChild(tr);
     }
   };

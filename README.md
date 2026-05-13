@@ -2,7 +2,7 @@
 
 # VideoDrop
 
-### YouTube → MP3 o MP4. Rápido, elegante y sin fricción.
+### YouTube → MP3, MP4 y texto. Rápido, elegante y sin fricción.
 
 <br/>
 
@@ -18,14 +18,16 @@
 
 ## ¿Qué es esto?
 
-**VideoDrop** es una app web minimalista para descargar audio (**MP3**) o video (**MP4**) de YouTube,
-con selector de calidad. Backend en Python con **FastAPI**, descargas con **yt-dlp**, conversión con
-**ffmpeg**, frontend en HTML/CSS/JS puro con tema oscuro, glassmorphism y animaciones suaves.
+**VideoDrop Studio** es una app web para descargar audio (**MP3**) o video (**MP4**) de YouTube,
+dividir videos largos por partes y desgrabar texto cuando el video expone subtítulos/captions.
+Backend en Python con **FastAPI**, descargas con **yt-dlp**, conversión con **ffmpeg** y frontend
+en HTML/CSS/JS puro.
 
 - Pega una URL → preview con thumbnail, título, uploader y duración.
 - Elige **Audio** o **Video** y escoge la calidad disponible.
 - Pulsa convertir → progreso en tiempo real (Server-Sent Events).
 - Descarga el archivo → lo borramos del servidor a los pocos segundos.
+- El desgrabador intenta extraer texto automáticamente después de leer el enlace.
 - Sin fricción para el usuario final, con controles de seguridad para operación.
 
 ## Características
@@ -36,6 +38,7 @@ con selector de calidad. Backend en Python con **FastAPI**, descargas con **yt-d
 - ⚡ Optimizado para arrancar rápido: `concurrent_fragment_downloads=5`, cache de
   metadatos, sin re-encode de video cuando los streams ya están en mp4.
 - 📡 Progreso en vivo con Server-Sent Events.
+- 📝 Desgrabador de captions/subtítulos con copia rápida del texto.
 - 🔒 Sanitización de nombres, validación de URL, límite de duración (30 min) y tamaño (2 GiB).
 - 🧹 Limpieza automática: archivos borrados al descargar + janitor cada 5 min.
 - 📱 Responsive total — móvil y escritorio (probado iPhone 13 Pro e iPad).
@@ -43,9 +46,12 @@ con selector de calidad. Backend en Python con **FastAPI**, descargas con **yt-d
 - 🛡️ Servicio aislado en systemd con hardening básico (no root, `ProtectSystem=strict`, `MemoryMax=600M`).
 - 🧭 Panel admin interno (`/admin`) con:
   - monitoreo de tráfico,
+  - sesiones recientes con datos de navegador consentidos,
   - registro de descargas y eventos,
-  - bloqueo/desbloqueo de IP en caliente.
+  - bloqueo/desbloqueo de IP en caliente,
+  - borrado de eventos de una sesión desde el panel.
 - 🗃️ Auditoría en PostgreSQL (`AUDIODROP_DATABASE_URL`).
+- 🧩 reCAPTCHA v3 opcional por variables de entorno para tráfico sospechoso.
 - 📜 Popup legal + páginas de Términos y Privacidad.
 
 ## Stack
@@ -96,7 +102,9 @@ audiodrop-work/
 | GET    | `/api/admin/overview`         | Resumen y eventos para el panel admin        |
 | POST   | `/api/admin/block-ip`         | Bloquear IP                                  |
 | POST   | `/api/admin/unblock-ip`       | Desbloquear IP                               |
+| POST   | `/api/admin/forget-client`    | Borrar eventos asociados a una sesión        |
 | POST   | `/api/metadata`               | Título, thumbnail, duración + `audio_options` y `video_options` disponibles |
+| POST   | `/api/transcript`             | Desgrabado de captions/subtítulos disponibles |
 | POST   | `/api/convert`                | Lanza el job. Body: `{url, format}` donde `format` ∈ `mp3-128 \| mp3-192 \| mp3-320 \| video-<height>[60]` |
 | GET    | `/api/progress/{job_id}`      | Stream SSE con el progreso                   |
 | GET    | `/api/download/{job_id}`      | Descarga el archivo (borra el server side después) |
@@ -190,6 +198,9 @@ si usas un patrón socat → VIP HA).
 | `AUDIODROP_LOG_LEVEL`     | `INFO`             | Nivel de logs.                                  |
 | `AUDIODROP_ADMIN_IP`      | `192.168.68.83`    | IP LAN autorizada para panel admin.             |
 | `AUDIODROP_DATABASE_URL`  | *(vacío)*          | DSN PostgreSQL para auditoría y bloqueo IP.     |
+| `AUDIODROP_RECAPTCHA_SITE_KEY` | *(vacío)*     | Site key de reCAPTCHA v3.                       |
+| `AUDIODROP_RECAPTCHA_SECRET_KEY` | *(vacío)*   | Secret de reCAPTCHA v3; si falta, queda off.    |
+| `AUDIODROP_RECAPTCHA_SCORE_THRESHOLD` | `0.45` | Score mínimo para aceptar tráfico sospechoso.   |
 
 ## Performance
 
@@ -214,6 +225,7 @@ Lo que se ha optimizado para que "Preparando…" no se eternice:
 - Videos privados o no disponibles devuelven un mensaje legible (no stacktrace).
 - Duración máxima 30 min por defecto, tamaño máximo 2 GiB.
 - Cuerpo HTTP topado a 8 KiB por el reverse proxy.
+- reCAPTCHA v3 puede activarse con variables de entorno; sin claves no se carga ningún script externo.
 - Descargas se borran tras 1 h o al completar la descarga del cliente.
 
 ## Limitaciones
