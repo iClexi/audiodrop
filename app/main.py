@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import hmac
 import json
 import logging
 import os
 import re
+import time
 import urllib.parse
 import urllib.request
 from ipaddress import ip_address
@@ -32,8 +35,10 @@ log = logging.getLogger("audiodrop")
 BASE_DIR = Path(__file__).resolve().parent
 WORK_DIR = Path(os.environ.get("AUDIODROP_WORK_DIR", "/tmp/audiodrop"))
 MAX_DURATION = int(os.environ.get("AUDIODROP_MAX_DURATION", "1800"))  # 30 min
-ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.68.83")
+ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.200.1")
 ADMIN_ENTRY_SECRET = os.environ.get("AUDIODROP_ADMIN_ENTRY_SECRET", "").strip()
+ADMIN_SESSION_COOKIE = "videodrop_admin"
+ADMIN_SESSION_TTL_SECONDS = max(300, int(os.environ.get("AUDIODROP_ADMIN_SESSION_TTL_SECONDS", "21600")))
 SENTRY_DSN = os.environ.get("AUDIODROP_SENTRY_DSN", "").strip()
 SENTRY_ENVIRONMENT = os.environ.get("AUDIODROP_SENTRY_ENVIRONMENT", os.environ.get("AUDIODROP_ENV", "production"))
 RECAPTCHA_SITE_KEY = os.environ.get("AUDIODROP_RECAPTCHA_SITE_KEY", "").strip()
@@ -123,16 +128,67 @@ def _request_meta(request: Request, *, event_type: str, status_code: int) -> dic
     }
 
 
-def _is_admin_request(request: Request) -> bool:
+def _admin_session_payload() -> str:
+    now = int(time.time())
+    payload = json.dumps(
+        {"iat": now, "exp": now + ADMIN_SESSION_TTL_SECONDS, "scope": "admin"},
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return base64.urlsafe_b64encode(payload.encode("utf-8")).decode("ascii").rstrip("=")
+
+
+def _sign_admin_session(payload: str) -> str:
+    return hmac.new(ADMIN_ENTRY_SECRET.encode("utf-8"), payload.encode("ascii"), hashlib.sha256).hexdigest()
+
+
+def _create_admin_session_token() -> str:
+    payload = _admin_session_payload()
+    return f"{payload}.{_sign_admin_session(payload)}"
+
+
+def _has_admin_session(request: Request) -> bool:
+    if not ADMIN_ENTRY_SECRET:
+        return False
+    token = request.cookies.get(ADMIN_SESSION_COOKIE, "")
+    try:
+        payload, signature = token.split(".", 1)
+    except ValueError:
+        return False
+    expected = _sign_admin_session(payload)
+    if not hmac.compare_digest(signature, expected):
+        return False
+    padded_payload = payload + "=" * (-len(payload) % 4)
+    try:
+        data = json.loads(base64.urlsafe_b64decode(padded_payload.encode("ascii")).decode("utf-8"))
+    except (ValueError, json.JSONDecodeError):
+        return False
+    try:
+        expires_at = int(data.get("exp") or 0)
+    except (TypeError, ValueError):
+        return False
+    return data.get("scope") == "admin" and expires_at >= int(time.time())
+
+
+def _is_local_admin_request(request: Request) -> bool:
     # Si hay cabeceras de Cloudflare, no consideramos esta peticion "local admin".
     if request.headers.get("cf-ray") or request.headers.get("cf-connecting-ip"):
         return False
     return _request_client_ip(request) == ADMIN_LAN_IP
 
 
+def _is_admin_request(request: Request) -> bool:
+    return _is_local_admin_request(request) or _has_admin_session(request)
+
+
 def _require_admin(request: Request) -> None:
     if not _is_admin_request(request):
         raise HTTPException(status_code=404, detail="No encontrado")
+
+
+def _is_secure_cookie_request(request: Request) -> bool:
+    forwarded_proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    return forwarded_proto == "https" or request.url.scheme == "https" or bool(request.headers.get("cf-ray"))
 
 
 def _template_context(request: Request) -> dict[str, Any]:
@@ -273,15 +329,23 @@ async def admin_eligible(request: Request) -> dict:
 async def admin_shortcut(request: Request, payload: dict) -> JSONResponse:
     if not ADMIN_ENTRY_SECRET:
         raise HTTPException(status_code=404, detail="No encontrado")
-    if not _is_admin_request(request):
-        raise HTTPException(status_code=404, detail="No encontrado")
     secret = str((payload or {}).get("secret") or "")
     ok = hmac.compare_digest(secret, ADMIN_ENTRY_SECRET)
     meta = _request_meta(request, event_type="admin_shortcut", status_code=200 if ok else 403)
-    await audit_store.log_event(meta, payload={"ok": ok})
+    await audit_store.log_event(meta, payload={"ok": ok, "session": ok})
     if not ok:
         raise HTTPException(status_code=403, detail="No autorizado")
-    return JSONResponse({"ok": True, "redirect": "/admin"})
+    response = JSONResponse({"ok": True, "redirect": "/admin"})
+    response.set_cookie(
+        ADMIN_SESSION_COOKIE,
+        _create_admin_session_token(),
+        max_age=ADMIN_SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=_is_secure_cookie_request(request),
+        samesite="lax",
+        path="/",
+    )
+    return response
 
 
 @app.post("/api/telemetry")
