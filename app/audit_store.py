@@ -176,14 +176,31 @@ class AuditStore:
         summary_sql = """
         SELECT
             COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours') AS requests_24h,
-            COUNT(*) FILTER (WHERE event_type = 'download' AND created_at >= NOW() - INTERVAL '24 hours') AS downloads_24h
+            COUNT(*) FILTER (WHERE event_type = 'download' AND created_at >= NOW() - INTERVAL '24 hours') AS downloads_24h,
+            COUNT(DISTINCT COALESCE(public_ip, client_ip, '') || '|' || COALESCE(user_agent, ''))
+                FILTER (WHERE created_at >= NOW() - INTERVAL '10 minutes') AS active_clients_10m
         FROM audit_events;
+        """
+        clients_sql = """
+        SELECT
+            COALESCE(NULLIF(public_ip, ''), NULLIF(client_ip, ''), 'unknown') AS ip,
+            COALESCE(NULLIF(user_agent, ''), 'unknown') AS user_agent,
+            MAX(created_at) AS last_seen,
+            COUNT(*) AS events_count,
+            MAX(path) AS last_path
+        FROM audit_events
+        WHERE created_at >= NOW() - INTERVAL '30 minutes'
+        GROUP BY 1, 2
+        ORDER BY last_seen DESC
+        LIMIT 80;
         """
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(events_sql, (limit,))
             event_rows = cur.fetchall()
             cur.execute(summary_sql)
             summary_row = cur.fetchone()
+            cur.execute(clients_sql)
+            client_rows = cur.fetchall()
             cur.execute(
                 "SELECT ip, reason, blocked_by, created_at FROM blocked_ips ORDER BY created_at DESC;"
             )
@@ -217,11 +234,23 @@ class AuditStore:
             }
             for r in blocked_rows
         ]
+        active_clients = [
+            {
+                "ip": r[0],
+                "user_agent": r[1],
+                "last_seen": r[2].isoformat() if r[2] else None,
+                "events_count": int(r[3] or 0),
+                "last_path": r[4],
+            }
+            for r in client_rows
+        ]
         return {
             "events": events,
             "blocked_ips": blocked_ips,
+            "active_clients": active_clients,
             "summary": {
                 "requests_24h": int(summary_row[0] or 0),
                 "downloads_24h": int(summary_row[1] or 0),
+                "active_clients_10m": int(summary_row[2] or 0),
             },
         }

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="index,follow" />
   <title>VideoDrop · Política de privacidad</title>
-  <link rel="stylesheet" href="/static/style.css?v=3" />
+  <link rel="stylesheet" href="/static/style.css?v=9" />
   {% include "sentry.html" %}
 </head>
 <body>
@@ -20,7 +20,7 @@
     <a class="legal-return" href="/">← Volver a la página principal</a>
     <section class="card glass legal-doc">
       <h1>Política de privacidad</h1>
-      <p class="muted">Última actualización: 2026-05-11</p>
+      <p class="muted">Última actualización: 2026-05-13</p>
 
       <h2>1. Responsable del tratamiento</h2>
       <p>
@@ -32,7 +32,8 @@
       <p>
         Para operación, seguridad y auditoría, podemos almacenar: IP pública, ruta solicitada,
         método HTTP, estado de respuesta, user-agent, referer, host, datos de telemetría del navegador
-        (idioma, plataforma, tamaño de pantalla, zona horaria, etc.) y eventos de descarga.
+        (idioma, plataforma, tamaño de pantalla, zona horaria, etc.), eventos de descarga,
+        solicitudes de metadata, selección de partes y solicitudes de transcripción.
       </p>
 
       <h2>3. Base jurídica y finalidades</h2>
@@ -40,7 +41,8 @@
         Tratamos estos datos por interés legítimo en seguridad, continuidad operativa y prevención de abuso,
         y por consentimiento cuando el usuario acepta los términos mostrados al iniciar.
         Las finalidades incluyen analítica operativa, diagnóstico técnico, monitoreo, trazabilidad de incidentes,
-        cumplimiento normativo y defensa frente a actividades maliciosas.
+        cumplimiento normativo y defensa frente a actividades maliciosas. No se implementa captura encubierta:
+        el tratamiento se comunica en esta política y en el aviso de aceptación.
       </p>
 
       <h2>4. Almacenamiento y seguridad</h2>
@@ -66,7 +68,8 @@
       <h2>7. Cookies y almacenamiento local</h2>
       <p>
         VideoDrop puede usar almacenamiento local del navegador (por ejemplo, localStorage) para registrar
-        aceptación de términos y mejorar la experiencia. No usamos este mecanismo para publicidad conductual.
+        aceptación de términos, cachear previews por tiempo limitado y mejorar la experiencia.
+        No usamos este mecanismo para publicidad conductual.
       </p>
 
       <h2>8. Menores de edad</h2>

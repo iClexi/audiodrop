@@ -4,7 +4,9 @@
   const $ = (id) => document.getElementById(id);
   const requests24h = $("requests-24h");
   const downloads24h = $("downloads-24h");
+  const active10m = $("active-10m");
   const eventsBody = $("events-table")?.querySelector("tbody");
+  const clientsBody = $("clients-table")?.querySelector("tbody");
   const blockedBody = $("blocked-table")?.querySelector("tbody");
   const blockForm = $("block-form");
   const blockIpInput = $("block-ip");
@@ -82,6 +84,26 @@
     }
   };
 
+  const renderClients = (rows) => {
+    if (!clientsBody) return;
+    clientsBody.innerHTML = "";
+    if (!rows.length) {
+      clientsBody.innerHTML = `<tr><td colspan="5" class="muted">Sin sesiones recientes.</td></tr>`;
+      return;
+    }
+    for (const client of rows) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${escapeHtml(fmtDate(client.last_seen))}</td>
+        <td><code>${escapeHtml(client.ip || "")}</code></td>
+        <td class="payload-cell" title="${escapeHtml(client.user_agent || "")}">${escapeHtml(client.user_agent || "")}</td>
+        <td>${escapeHtml(client.events_count ?? 0)}</td>
+        <td>${escapeHtml(client.last_path || "")}</td>
+      `;
+      clientsBody.appendChild(tr);
+    }
+  };
+
   const refresh = async () => {
     const res = await fetch("/api/admin/overview", { credentials: "same-origin" });
     if (!res.ok) {
@@ -90,7 +112,9 @@
     const data = await res.json();
     requests24h.textContent = String(data?.summary?.requests_24h ?? 0);
     downloads24h.textContent = String(data?.summary?.downloads_24h ?? 0);
+    if (active10m) active10m.textContent = String(data?.summary?.active_clients_10m ?? 0);
     renderBlocked(data?.blocked_ips || []);
+    renderClients(data?.active_clients || []);
     renderEvents(data?.events || []);
   };
 

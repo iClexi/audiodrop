@@ -4,22 +4,22 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#0b0b14" />
-  <meta name="description" content="VideoDrop te deja descargar videos de YouTube en MP3, MP4 y hasta 8K con una interfaz rápida, limpia y sin complicaciones." />
+  <meta name="description" content="VideoDrop descarga YouTube en MP3 o MP4, divide videos largos por partes y extrae transcripciones cuando el video expone subtítulos." />
   <meta name="robots" content="index,follow,max-image-preview:large" />
   <link rel="canonical" href="https://videodrop.iclexi.tech/" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="VideoDrop" />
-  <meta property="og:title" content="VideoDrop · Descargar videos de YouTube en MP3, MP4 y 8K" />
-  <meta property="og:description" content="VideoDrop convierte enlaces de YouTube en descargas rápidas de MP3, MP4 y hasta 8K desde una interfaz limpia y móvil." />
+  <meta property="og:title" content="VideoDrop · YouTube a MP3, MP4, partes y transcripción" />
+  <meta property="og:description" content="Convierte, divide y transcribe videos de YouTube desde una interfaz rápida, responsive y preparada para escritorio." />
   <meta property="og:url" content="https://videodrop.iclexi.tech/" />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="VideoDrop · Descargar videos de YouTube en MP3, MP4 y 8K" />
-  <meta name="twitter:description" content="Convierte enlaces de YouTube en MP3, MP4 y hasta 8K con una interfaz rápida y limpia." />
-  <title>VideoDrop · Descargar videos de YouTube en MP3, MP4 y 8K</title>
+  <meta name="twitter:title" content="VideoDrop · YouTube a MP3, MP4, partes y transcripción" />
+  <meta name="twitter:description" content="Convierte, divide y transcribe videos de YouTube con una interfaz rápida y limpia." />
+  <title>VideoDrop · YouTube a MP3, MP4, partes y transcripción</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=3" />
+  <link rel="stylesheet" href="/static/style.css?v=9" />
   {% include "sentry.html" %}
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%23a855f7'/%3E%3Cstop offset='1' stop-color='%2306b6d4'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='8' fill='url(%23g)'/%3E%3Cpath d='M11 11v10l8-5z' fill='white'/%3E%3C/svg%3E" />
   <script type="application/ld+json">
@@ -32,7 +32,7 @@
         "applicationCategory": "MultimediaApplication",
         "operatingSystem": "Web",
         "url": "https://videodrop.iclexi.tech/",
-        "description": "Descarga videos de YouTube en MP3, MP4 y hasta 8K con una interfaz rápida y limpia."
+        "description": "Descarga videos de YouTube en MP3 o MP4, divide videos largos por partes y extrae transcripciones cuando hay subtítulos disponibles."
       },
       {
         "@type": "FAQPage",
@@ -118,10 +118,10 @@
         Descargar videos de YouTube en <span class="grad">MP3, MP4 y 8K</span>.
       </h1>
       <p class="subtitle">
-        VideoDrop convierte enlaces de YouTube en descargas rápidas, limpias y sin complicaciones.
+        Descarga, divide videos largos por partes y extrae texto cuando YouTube expone subtítulos.
       </p>
 
-      <form id="form" class="card glass" novalidate>
+      <form id="form" class="card glass converter-card" novalidate>
         <label class="sr-only" for="url">URL de YouTube</label>
         <div class="field">
           <span class="field-icon" aria-hidden="true">
@@ -133,6 +133,34 @@
         </div>
         <p id="hint" class="hint" role="status" aria-live="polite"></p>
       </form>
+
+      <section id="idle-panel" class="card glass idle-panel" aria-label="Modos disponibles">
+        <div class="idle-head">
+          <div>
+            <p class="eyebrow">Workbench</p>
+            <h2 class="section-title">Listo para convertir.</h2>
+          </div>
+          <span class="idle-status">MP3 · MP4 · texto</span>
+        </div>
+        <div class="mode-strip">
+          <span>
+            <strong>MP3</strong>
+            <small>128 / 192 / 320</small>
+          </span>
+          <span>
+            <strong>MP4</strong>
+            <small>hasta 8K</small>
+          </span>
+          <span>
+            <strong>Partes</strong>
+            <small>videos largos</small>
+          </span>
+          <span>
+            <strong>Texto</strong>
+            <small>captions reales</small>
+          </span>
+        </div>
+      </section>
 
       <section id="preview" class="card glass preview hidden" aria-live="polite">
         <div class="preview-top">
@@ -165,6 +193,17 @@
           <div id="qualities" class="qualities" role="radiogroup" aria-label="Calidad"></div>
         </div>
 
+        <section id="segment-panel" class="segment-panel hidden" aria-live="polite">
+          <div>
+            <p class="eyebrow">Video largo</p>
+            <p id="segment-copy" class="segment-copy">
+              Este video supera el límite por descarga. Elige una parte y luego descarga la siguiente.
+            </p>
+          </div>
+          <label class="segment-select-label" for="segment-select">Parte</label>
+          <select id="segment-select" class="segment-select"></select>
+        </section>
+
         <div class="progress" aria-hidden="true">
           <div id="bar" class="progress-bar"></div>
           <div class="progress-glow"></div>
@@ -176,11 +215,26 @@
             <span class="primary-label" id="primary-label">Descargar MP3 · 192 kbps</span>
             <span class="primary-spinner" aria-hidden="true"></span>
           </button>
+          <button id="transcribe" type="button" class="secondary-action hidden">
+            Transcribir texto
+          </button>
           <a id="download" class="primary download hidden" download>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Guardar archivo
           </a>
         </div>
+      </section>
+
+      <section id="transcript-panel" class="card glass transcript-panel hidden" aria-live="polite">
+        <div class="transcript-head">
+          <div>
+            <p class="eyebrow">Transcripción</p>
+            <h2 class="section-title">Texto extraído del video</h2>
+          </div>
+          <button id="copy-transcript" type="button" class="ghost">Copiar</button>
+        </div>
+        <p id="transcript-meta" class="muted transcript-meta">—</p>
+        <pre id="transcript-text" class="transcript-text"></pre>
       </section>
 
       <ul class="features" aria-label="Características">
@@ -202,17 +256,22 @@
           </span>
           <span>Hasta 8K 60fps</span>
         </li>
+        <li>
+          <span class="feat-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="M8 8h8"/><path d="M8 12h8"/><path d="M8 16h5"/></svg>
+          </span>
+          <span>Transcripción</span>
+        </li>
       </ul>
 
       <section class="card glass seo-card">
         <div class="seo-grid">
           <div>
             <p class="eyebrow">Pensado para búsquedas</p>
-            <h2 class="section-title">Descarga videos de YouTube en segundos.</h2>
+            <h2 class="section-title">Un espacio de trabajo para videos de YouTube.</h2>
             <p class="section-copy">
-              VideoDrop está optimizado para quien quiere convertir un enlace de YouTube en MP3 o MP4
-              sin rodeos. La interfaz muestra la calidad real disponible, soporta resoluciones altas
-              cuando el origen las ofrece y funciona bien en móvil y escritorio.
+              VideoDrop usa todo el escritorio: enlace, preview, calidades, partes y transcripción
+              conviven sin obligarte a bajar y subir por una página estrecha.
             </p>
           </div>
           <div class="seo-points">
@@ -225,8 +284,12 @@
               <p>Usa la calidad real que el video expone, incluyendo 60 fps cuando existe.</p>
             </article>
             <article>
-              <h3>Sin guardar nada</h3>
-              <p>Los archivos se limpian solos después de descargarlos.</p>
+              <h3>Videos largos por partes</h3>
+              <p>Si supera el límite, eliges la primera parte y después continúas con las demás.</p>
+            </article>
+            <article>
+              <h3>Texto cuando existe</h3>
+              <p>Extrae captions/subtítulos disponibles sin inventar contenido.</p>
             </article>
           </div>
         </div>
@@ -246,7 +309,7 @@
           </details>
           <details>
             <summary>¿Qué pasa si el video no se puede procesar?</summary>
-            <p>Verás un mensaje claro con la razón: privado, no disponible, demasiado largo o formato no soportado.</p>
+            <p>Verás un mensaje claro con la razón: privado, no disponible, sin captions o formato no soportado.</p>
           </details>
         </div>
       </section>
@@ -263,6 +326,6 @@
     <a class="footer-link" href="/privacidad">Privacidad</a>
   </footer>
 
-  <script src="/static/app.js?v=4" defer></script>
+  <script src="/static/app.js?v=6" defer></script>
 </body>
 </html>

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -30,6 +31,7 @@ BASE_DIR = Path(__file__).resolve().parent
 WORK_DIR = Path(os.environ.get("AUDIODROP_WORK_DIR", "/tmp/audiodrop"))
 MAX_DURATION = int(os.environ.get("AUDIODROP_MAX_DURATION", "1800"))  # 30 min
 ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.68.83")
+ADMIN_ENTRY_SECRET = os.environ.get("AUDIODROP_ADMIN_ENTRY_SECRET", "").strip()
 SENTRY_DSN = os.environ.get("AUDIODROP_SENTRY_DSN", "").strip()
 SENTRY_ENVIRONMENT = os.environ.get("AUDIODROP_SENTRY_ENVIRONMENT", os.environ.get("AUDIODROP_ENV", "production"))
 
@@ -188,6 +190,21 @@ async def admin_eligible(request: Request) -> dict:
     return {"eligible": _is_admin_request(request)}
 
 
+@app.post("/api/admin-shortcut")
+async def admin_shortcut(request: Request, payload: dict) -> JSONResponse:
+    if not ADMIN_ENTRY_SECRET:
+        raise HTTPException(status_code=404, detail="No encontrado")
+    if not _is_admin_request(request):
+        raise HTTPException(status_code=404, detail="No encontrado")
+    secret = str((payload or {}).get("secret") or "")
+    ok = hmac.compare_digest(secret, ADMIN_ENTRY_SECRET)
+    meta = _request_meta(request, event_type="admin_shortcut", status_code=200 if ok else 403)
+    await audit_store.log_event(meta, payload={"ok": ok})
+    if not ok:
+        raise HTTPException(status_code=403, detail="No autorizado")
+    return JSONResponse({"ok": True, "redirect": "/admin"})
+
+
 @app.post("/api/telemetry")
 async def browser_telemetry(request: Request, payload: dict) -> JSONResponse:
     browser = (payload or {}).get("browser", {})
@@ -268,10 +285,40 @@ async def metadata(request: Request, payload: dict) -> JSONResponse:
     return JSONResponse(info)
 
 
+@app.post("/api/transcript")
+async def transcript(request: Request, payload: dict) -> JSONResponse:
+    url = (payload or {}).get("url", "").strip()
+    language = (payload or {}).get("language", "").strip()[:12]
+    if not _is_valid_youtube_url(url):
+        raise HTTPException(status_code=400, detail="URL inválida")
+    try:
+        data = await service.fetch_transcript(url, preferred_language=language)
+    except ConversionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    meta = _request_meta(request, event_type="transcript", status_code=200)
+    await audit_store.log_event(
+        meta,
+        payload={
+            "url": url,
+            "language": data.get("language"),
+            "source": data.get("source"),
+            "characters": data.get("characters"),
+        },
+    )
+    return JSONResponse(data)
+
+
 @app.post("/api/convert")
 async def convert(request: Request, payload: dict) -> JSONResponse:
     url = (payload or {}).get("url", "").strip()
     format_key = (payload or {}).get("format", "mp3-192").strip()
+    raw_segment_index = (payload or {}).get("segment_index")
+    segment_index: int | None = None
+    if raw_segment_index is not None:
+        try:
+            segment_index = int(raw_segment_index)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Parte inválida") from exc
     if not _is_valid_youtube_url(url):
         raise HTTPException(status_code=400, detail="URL inválida")
     if not re.fullmatch(
@@ -280,11 +327,14 @@ async def convert(request: Request, payload: dict) -> JSONResponse:
     ):
         raise HTTPException(status_code=400, detail="Formato no soportado")
     try:
-        job_id = await service.start_job(url, format_key=format_key)
+        job_id = await service.start_job(url, format_key=format_key, segment_index=segment_index)
     except ConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     meta = _request_meta(request, event_type="convert", status_code=202)
-    await audit_store.log_event(meta, payload={"job_id": job_id, "url": url, "format_key": format_key})
+    await audit_store.log_event(
+        meta,
+        payload={"job_id": job_id, "url": url, "format_key": format_key, "segment_index": segment_index},
+    )
     return JSONResponse({"job_id": job_id})
 
 

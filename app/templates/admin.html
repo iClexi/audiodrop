@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex,nofollow" />
   <title>VideoDrop · Admin</title>
-  <link rel="stylesheet" href="/static/style.css?v=3" />
+  <link rel="stylesheet" href="/static/style.css?v=9" />
   {% include "sentry.html" %}
 </head>
 <body>
@@ -34,6 +34,10 @@
           <h2>Descargas (24h)</h2>
           <p id="downloads-24h">0</p>
         </article>
+        <article class="admin-stat">
+          <h2>Activos (10m)</h2>
+          <p id="active-10m">0</p>
+        </article>
       </div>
 
       <section class="admin-blocker">
@@ -55,6 +59,24 @@
                 <th>Razón</th>
                 <th>Fecha</th>
                 <th>Acción</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="admin-section">
+        <h2>Sesiones recientes</h2>
+        <div class="admin-table-wrap">
+          <table class="admin-table" id="clients-table">
+            <thead>
+              <tr>
+                <th>Última vez</th>
+                <th>IP</th>
+                <th>Navegador / dispositivo</th>
+                <th>Eventos</th>
+                <th>Ruta</th>
               </tr>
             </thead>
             <tbody></tbody>
@@ -89,6 +111,6 @@
     <a class="footer-link" href="/privacidad">Privacidad</a>
   </footer>
 
-  <script src="/static/admin.js?v=1" defer></script>
+  <script src="/static/admin.js?v=2" defer></script>
 </body>
 </html>

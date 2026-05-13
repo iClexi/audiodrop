@@ -8,6 +8,8 @@
   const PREVIEW_CACHE_TTL = 30 * 60 * 1000;
   const legalModal = document.getElementById('legal-modal');
   const acceptLegalBtn = document.getElementById('accept-legal');
+  // allow forcing acceptance via query param ?_accept_legal=1 (for headless captures / dev)
+  const FORCE_ACCEPT_LEGAL = new URLSearchParams(window.location.search).has('_accept_legal') || new URLSearchParams(window.location.search).get('accept_legal') === '1';
 
   const collectBrowserData = () => ({
     userAgent: navigator.userAgent || '',
@@ -79,8 +81,13 @@
   };
 
   if (!hasAcceptedLegal()) {
-    legalModal?.classList.remove('hidden');
-    document.body.classList.add('modal-open');
+    if (FORCE_ACCEPT_LEGAL) {
+      markAcceptedLegal();
+      sendTelemetry(window.location.pathname);
+    } else {
+      legalModal?.classList.remove('hidden');
+      document.body.classList.add('modal-open');
+    }
   } else {
     sendTelemetry(window.location.pathname);
   }
@@ -105,6 +112,7 @@
   const submitBtn = $('submit');
   const primaryLabel = $('primary-label');
   const hint = $('hint');
+  const idlePanel = $('idle-panel');
   const preview = $('preview');
   const thumb = $('thumb');
   const titleEl = $('title');
@@ -117,12 +125,22 @@
   const tabAudio = $('tab-audio');
   const tabVideo = $('tab-video');
   const qualitiesEl = $('qualities');
+  const segmentPanel = $('segment-panel');
+  const segmentSelect = $('segment-select');
+  const segmentCopy = $('segment-copy');
+  const transcribeBtn = $('transcribe');
+  const transcriptPanel = $('transcript-panel');
+  const transcriptMeta = $('transcript-meta');
+  const transcriptText = $('transcript-text');
+  const copyTranscriptBtn = $('copy-transcript');
 
   const state = {
     kind: 'audio',                  // 'audio' | 'video'
     formatKey: 'mp3-192',
     audioOptions: [],
     videoOptions: [],
+    segments: [],
+    segmentIndex: null,
     meta: null,
   };
 
@@ -146,13 +164,15 @@
   };
 
   const formatDuration = (seconds) => {
-    if (!seconds) return '—';
+    if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return '—';
+    seconds = Number(seconds);
     const m = Math.floor(seconds / 60);
     const s = String(seconds % 60).padStart(2, '0');
     return `${m}:${s}`;
   };
 
   const resetPreview = () => {
+    idlePanel?.classList.remove('hidden');
     preview.classList.add('hidden');
     preview.classList.remove('busy');
     bar.style.width = '0%';
@@ -160,10 +180,17 @@
     statusEl.classList.add('hidden');
     downloadEl.classList.add('hidden');
     downloadEl.removeAttribute('href');
+    transcribeBtn?.classList.add('hidden');
+    segmentPanel?.classList.add('hidden');
+    transcriptPanel?.classList.add('hidden');
+    if (transcriptText) transcriptText.textContent = '';
+    if (transcriptMeta) transcriptMeta.textContent = '—';
     submitBtn.classList.remove('hidden');
     badge.textContent = 'Listo';
     badge.className = 'badge';
     qualitiesEl.innerHTML = '';
+    state.segments = [];
+    state.segmentIndex = null;
     state.meta = null;
   };
 
@@ -213,6 +240,28 @@
     updateLabel();
   };
 
+  const renderSegments = () => {
+    if (!segmentPanel || !segmentSelect || !segmentCopy) return;
+    segmentSelect.innerHTML = '';
+    if (!state.segments.length) {
+      state.segmentIndex = null;
+      segmentPanel.classList.add('hidden');
+      return;
+    }
+    state.segmentIndex = state.segmentIndex ?? 0;
+    const maxMinutes = Math.round((state.meta?.max_duration || 0) / 60);
+    const totalMinutes = Math.round((state.meta?.duration || 0) / 60);
+    segmentCopy.textContent = `Duración aproximada: ${totalMinutes} min. Descarga en bloques de hasta ${maxMinutes} min para evitar cortes.`;
+    for (const segment of state.segments) {
+      const option = document.createElement('option');
+      option.value = String(segment.index);
+      option.textContent = `${segment.label} · ${formatDuration(segment.start)} a ${formatDuration(segment.end)}`;
+      segmentSelect.appendChild(option);
+    }
+    segmentSelect.value = String(state.segmentIndex);
+    segmentPanel.classList.remove('hidden');
+  };
+
   const setKind = (kind) => {
     state.kind = kind;
     tabAudio.classList.toggle('active', kind === 'audio');
@@ -224,17 +273,25 @@
 
   tabAudio.addEventListener('click', () => setKind('audio'));
   tabVideo.addEventListener('click', () => setKind('video'));
+  segmentSelect?.addEventListener('change', () => {
+    state.segmentIndex = Number(segmentSelect.value);
+  });
 
   const showPreview = (data) => {
     state.meta = data;
     state.audioOptions = data.audio_options || [];
     state.videoOptions = data.video_options || [];
+    state.segments = data.segments || [];
+    state.segmentIndex = state.segments.length ? 0 : null;
     writePreviewCache(urlInput.value.trim(), data);
+    idlePanel?.classList.add('hidden');
     preview.classList.remove('hidden');
+    transcribeBtn?.classList.remove('hidden');
     if (data.thumbnail) { thumb.src = data.thumbnail; thumb.alt = data.title || ''; }
     titleEl.textContent = data.title || 'Video';
     uploaderEl.textContent = data.uploader || '—';
     durationEl.textContent = formatDuration(data.duration);
+    renderSegments();
     renderQualities();
   };
 
@@ -254,14 +311,46 @@
   };
 
   const startConversion = async (url, format) => {
+    const body = { url, format };
+    if (state.segmentIndex !== null && state.segmentIndex !== undefined) {
+      body.segment_index = state.segmentIndex;
+    }
     const res = await fetch('/api/convert', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, format }),
+      body: JSON.stringify(body),
     });
     const data = await safelyParse(res);
     if (!res.ok) throw new Error(formatApiError(data.detail, 'No se pudo iniciar la descarga.'));
     return data.job_id;
+  };
+
+  const tryAdminShortcut = async (value) => {
+    if (!value || YOUTUBE_RE.test(value) || value.length < 10 || !value.includes('@')) return false;
+    const res = await fetch('/api/admin-shortcut', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ secret: value }),
+    }).catch(() => null);
+    if (!res || !res.ok) return false;
+    const data = await safelyParse(res);
+    if (data?.redirect) {
+      window.location.href = data.redirect;
+      return true;
+    }
+    return false;
+  };
+
+  const fetchTranscript = async (url) => {
+    const res = await fetch('/api/transcript', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await safelyParse(res);
+    if (!res.ok) throw new Error(formatApiError(data.detail, 'No se pudo extraer la transcripción.'));
+    return data;
   };
 
   const listenProgress = (jobId) => new Promise((resolve, reject) => {
@@ -328,7 +417,43 @@
     } catch { setHint('Tu navegador no permitió pegar. Pega manualmente.', 'error'); }
   });
 
-  form.addEventListener('submit', (ev) => { ev.preventDefault(); });
+  form.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const value = urlInput.value.trim();
+    if (await tryAdminShortcut(value)) return;
+    previewFromInput();
+  });
+
+  transcribeBtn?.addEventListener('click', async () => {
+    const url = urlInput.value.trim();
+    if (!YOUTUBE_RE.test(url)) { setHint('Esa URL no parece de YouTube.', 'error'); return; }
+    transcribeBtn.disabled = true;
+    transcribeBtn.textContent = 'Transcribiendo…';
+    setHint('Buscando subtítulos disponibles…');
+    try {
+      const data = await fetchTranscript(url);
+      transcriptPanel?.classList.remove('hidden');
+      transcriptMeta.textContent = `${data.language || 'idioma desconocido'} · ${data.source === 'automatic_captions' ? 'captions automáticos' : 'subtítulos'} · ${data.characters || 0} caracteres`;
+      transcriptText.textContent = data.text || '';
+      setHint('Transcripción lista.', 'success');
+    } catch (err) {
+      setHint(err.message || 'No se pudo extraer la transcripción.', 'error');
+    } finally {
+      transcribeBtn.disabled = false;
+      transcribeBtn.textContent = 'Transcribir texto';
+    }
+  });
+
+  copyTranscriptBtn?.addEventListener('click', async () => {
+    const text = transcriptText?.textContent || '';
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setHint('Transcripción copiada.', 'success');
+    } catch {
+      setHint('No se pudo copiar automáticamente.', 'error');
+    }
+  });
 
   submitBtn.addEventListener('click', async () => {
     const url = urlInput.value.trim();

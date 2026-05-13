@@ -9,10 +9,14 @@ La capa HTTP nunca debería tocar yt-dlp ni el sistema de archivos directamente.
 from __future__ import annotations
 
 import asyncio
+import html
+import json
 import logging
 import re
 import shutil
 import time
+import urllib.parse
+import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -86,6 +90,10 @@ class Job:
     message: str = ""
     file_path: Optional[Path] = None
     filename: Optional[str] = None
+    segment_index: Optional[int] = None
+    segment_start: Optional[int] = None
+    segment_end: Optional[int] = None
+    total_segments: Optional[int] = None
     created_at: float = field(default_factory=time.time)
     subscribers: list[asyncio.Queue] = field(default_factory=list)
     cleaned: bool = False
@@ -140,6 +148,69 @@ def _available_video_options(info: dict) -> list[dict]:
     return available
 
 
+def _build_segments(duration: int, max_duration: int) -> list[dict]:
+    if not duration or duration <= max_duration:
+        return []
+    segments = []
+    start = 0
+    idx = 1
+    while start < duration:
+        end = min(duration, start + max_duration)
+        segments.append(
+            {
+                "index": idx - 1,
+                "label": f"Parte {idx}",
+                "start": start,
+                "end": end,
+                "duration": end - start,
+            }
+        )
+        start = end
+        idx += 1
+    total = len(segments)
+    for segment in segments:
+        segment["label"] = f"Parte {segment['index'] + 1} de {total}"
+    return segments
+
+
+def _strip_caption_markup(value: str) -> str:
+    value = re.sub(r"<[^>]+>", "", value)
+    value = html.unescape(value)
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _parse_vtt(text: str) -> str:
+    lines: list[str] = []
+    last = ""
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.upper().startswith(("WEBVTT", "NOTE", "STYLE", "REGION", "KIND:", "LANGUAGE:")):
+            continue
+        if "-->" in line or re.fullmatch(r"\d+", line):
+            continue
+        cleaned = _strip_caption_markup(line)
+        if cleaned and cleaned != last:
+            lines.append(cleaned)
+            last = cleaned
+    return " ".join(lines)
+
+
+def _parse_json3(text: str) -> str:
+    data = json.loads(text)
+    lines: list[str] = []
+    last = ""
+    for event in data.get("events", []):
+        pieces = event.get("segs") or []
+        line = "".join(str(piece.get("utf8", "")) for piece in pieces)
+        cleaned = _strip_caption_markup(line)
+        if cleaned and cleaned != last:
+            lines.append(cleaned)
+            last = cleaned
+    return " ".join(lines)
+
+
 class AudioService:
     def __init__(self, work_dir: Path, max_duration: int) -> None:
         self.work_dir = work_dir
@@ -154,10 +225,7 @@ class AudioService:
     async def fetch_metadata(self, url: str) -> dict:
         info = await self._cached_info(url)
         duration = info.get("duration") or 0
-        if duration and duration > self.max_duration:
-            raise ConversionError(
-                f"Video demasiado largo ({duration//60} min). Máximo {self.max_duration//60} min."
-            )
+        segments = _build_segments(duration, self.max_duration)
         return {
             "title": info.get("title") or "Media",
             "thumbnail": info.get("thumbnail") or "",
@@ -165,7 +233,113 @@ class AudioService:
             "uploader": info.get("uploader") or "",
             "audio_options": AUDIO_OPTIONS,
             "video_options": _available_video_options(info),
+            "max_duration": self.max_duration,
+            "exceeds_limit": bool(segments),
+            "segments": segments,
         }
+
+    async def fetch_transcript(self, url: str, preferred_language: str = "") -> dict:
+        info = await self._cached_info(url)
+        return await asyncio.to_thread(self._extract_transcript_sync, info, preferred_language)
+
+    def _extract_transcript_sync(self, info: dict, preferred_language: str = "") -> dict:
+        subtitles = info.get("subtitles") or {}
+        automatic = info.get("automatic_captions") or {}
+        languages: list[str] = []
+        if preferred_language:
+            languages.append(preferred_language)
+        languages.extend(["es", "es-419", "en", "en-US"])
+        languages.extend(sorted(set(subtitles.keys()) | set(automatic.keys())))
+
+        seen: set[str] = set()
+        last_error: Optional[ConversionError] = None
+        for lang in languages:
+            if not lang or lang in seen:
+                continue
+            seen.add(lang)
+            sources: list[tuple[str, list[dict]]] = []
+            if lang in subtitles:
+                sources.append(("subtitles", subtitles.get(lang) or []))
+            if lang in automatic:
+                sources.append(("automatic_captions", automatic.get(lang) or []))
+            for source, tracks in sources:
+                for track in self._caption_track_candidates(tracks):
+                    try:
+                        text = self._download_caption_text(track)
+                    except ConversionError as exc:
+                        last_error = exc
+                        continue
+                    try:
+                        if track.get("ext") == "json3" and not text.lstrip().startswith("#EXTM3U"):
+                            transcript = _parse_json3(text)
+                        else:
+                            transcript = _parse_vtt(text)
+                    except Exception:  # noqa: BLE001 - caption endpoints sometimes return non-matching payloads
+                        continue
+                    if transcript:
+                        return {
+                            "title": info.get("title") or "Media",
+                            "language": lang,
+                            "source": source,
+                            "text": transcript,
+                            "characters": len(transcript),
+                        }
+        if last_error:
+            raise ConversionError("No se pudo leer la transcripción.") from last_error
+        raise ConversionError("Este video no expone subtítulos o transcripción descargable.")
+
+    def _choose_caption_track(self, tracks: list[dict]) -> Optional[dict]:
+        return next(iter(self._caption_track_candidates(tracks)), None)
+
+    def _caption_track_candidates(self, tracks: list[dict]) -> list[dict]:
+        if not isinstance(tracks, list):
+            return []
+        candidates: list[dict] = []
+        seen_urls: set[str] = set()
+        for ext in ("vtt", "json3"):
+            for track in tracks:
+                url = track.get("url")
+                if track.get("ext") == ext and url and url not in seen_urls:
+                    candidates.append(track)
+                    seen_urls.add(url)
+        for track in tracks:
+            url = track.get("url")
+            if url and url not in seen_urls:
+                candidates.append(track)
+                seen_urls.add(url)
+        return candidates
+
+    def _download_caption_text(self, track: dict) -> str:
+        text = self._download_text_url(track["url"])
+        if text.lstrip().startswith("#EXTM3U"):
+            parts: list[str] = []
+            total = 0
+            for line in text.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                segment_url = urllib.parse.urljoin(track["url"], line)
+                segment = self._download_text_url(segment_url)
+                if not segment:
+                    continue
+                parts.append(segment)
+                total += len(segment)
+                if total >= 4 * 1024 * 1024 or len(parts) >= 240:
+                    break
+            return "\n".join(parts)
+        return text
+
+    def _download_text_url(self, url: str) -> str:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "Mozilla/5.0 VideoDrop"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=8) as res:  # noqa: S310 - yt-dlp provided caption URL
+                data = res.read(4 * 1024 * 1024)
+        except Exception as exc:  # noqa: BLE001
+            raise ConversionError("No se pudo leer la transcripción.") from exc
+        return data.decode("utf-8", errors="replace")
 
     async def _cached_info(self, url: str) -> dict:
         """Devuelve info de yt-dlp con cache corto (evita llamar dos veces seguidas)."""
@@ -200,12 +374,20 @@ class AudioService:
 
     # ---------------------------------------------------------------- jobs
 
-    async def start_job(self, url: str, format_key: str = "mp3-192") -> str:
+    async def start_job(self, url: str, format_key: str = "mp3-192", segment_index: int | None = None) -> str:
         _parse_format_key(format_key)
         # Reusa la info ya extraída por /api/metadata (cache de 90s); evita llamar yt-dlp 2 veces.
         info = await self._cached_info(url)
         duration = info.get("duration") or 0
-        if duration and duration > self.max_duration:
+        segments = _build_segments(duration, self.max_duration)
+        selected_segment: dict | None = None
+        if segments:
+            if segment_index is None:
+                segment_index = 0
+            if segment_index < 0 or segment_index >= len(segments):
+                raise ConversionError("Parte de video inválida.")
+            selected_segment = segments[segment_index]
+        elif duration and duration > self.max_duration:
             raise ConversionError(
                 f"Video demasiado largo ({duration//60} min). Máximo {self.max_duration//60} min."
             )
@@ -218,6 +400,10 @@ class AudioService:
             title=info.get("title") or "Media",
             thumbnail=info.get("thumbnail") or "",
             duration=duration,
+            segment_index=selected_segment["index"] if selected_segment else None,
+            segment_start=selected_segment["start"] if selected_segment else None,
+            segment_end=selected_segment["end"] if selected_segment else None,
+            total_segments=len(segments) if segments else None,
         )
         async with self._lock:
             self.jobs[job_id] = job
@@ -312,6 +498,9 @@ class AudioService:
             "max_filesize": 2 * 1024 * 1024 * 1024,  # 2 GiB hard cap
             "progress_hooks": [hook],
         }
+        if job.segment_start is not None and job.segment_end is not None:
+            base_opts["download_sections"] = [f"*{job.segment_start}-{job.segment_end}"]
+            base_opts["force_keyframes_at_cuts"] = True
 
         if kind == "audio":
             # Prefiere m4a (AAC nativo de YouTube): ffmpeg sólo re-encodea a MP3, no re-mux.
@@ -361,7 +550,10 @@ class AudioService:
         if final is None:
             raise ConversionError("La conversión no produjo archivo final.")
         job.file_path = final
-        job.filename = f"{safe_title}.{final.suffix.lstrip('.')}"
+        part_suffix = ""
+        if job.segment_index is not None and job.total_segments:
+            part_suffix = f" - parte {job.segment_index + 1} de {job.total_segments}"
+        job.filename = f"{safe_title}{part_suffix}.{final.suffix.lstrip('.')}"
         self._publish_sync(job, status="done", progress=100.0, message="Listo para descargar.")
 
     def _snapshot(self, job: Job) -> dict:
@@ -375,6 +567,10 @@ class AudioService:
             "duration": job.duration,
             "filename": job.filename,
             "format_key": job.format_key,
+            "segment_index": job.segment_index,
+            "segment_start": job.segment_start,
+            "segment_end": job.segment_end,
+            "total_segments": job.total_segments,
         }
 
     def _publish_sync(self, job: Job, *, status: str, progress: float | None = None, message: str = "") -> None:
