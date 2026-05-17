@@ -5,6 +5,8 @@
   const requests24h = $("requests-24h");
   const downloads24h = $("downloads-24h");
   const active10m = $("active-10m");
+  const usersTotal = $("users-total");
+  const adminUser = $("admin-user");
   const eventsBody = $("events-table")?.querySelector("tbody");
   const clientsBody = $("clients-table")?.querySelector("tbody");
   const blockedBody = $("blocked-table")?.querySelector("tbody");
@@ -125,7 +127,7 @@
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>${escapeHtml(fmtDate(ev.created_at))}</td>
-        <td><code>${escapeHtml(ev.event_type)}</code></td>
+        <td><code>${escapeHtml(ev.event_type)}</code>${ev.username ? `<br><small>${escapeHtml(ev.username)}</small>` : ""}</td>
         <td><code>${escapeHtml(ev.public_ip || ev.client_ip || "")}</code></td>
         <td>${escapeHtml(ev.path || "")}</td>
         <td>${escapeHtml(ev.status_code ?? "")}</td>
@@ -175,6 +177,7 @@
     requests24h.textContent = String(data?.summary?.requests_24h ?? 0);
     downloads24h.textContent = String(data?.summary?.downloads_24h ?? 0);
     if (active10m) active10m.textContent = String(data?.summary?.active_clients_10m ?? 0);
+    if (usersTotal) usersTotal.textContent = String(data?.summary?.users_total ?? 0);
     renderBlocked(data?.blocked_ips || []);
     renderClients(data?.active_clients || []);
     renderEvents(data?.events || []);
@@ -204,4 +207,11 @@
     console.error(err);
     alert("Error cargando panel admin.");
   });
+
+  fetch("/api/auth/me", { credentials: "same-origin" })
+    .then((res) => res.ok ? res.json() : { user: null })
+    .then((data) => {
+      if (adminUser && data.user) adminUser.textContent = data.user.username;
+    })
+    .catch(() => {});
 })();

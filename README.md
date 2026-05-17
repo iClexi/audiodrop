@@ -1,241 +1,199 @@
 <div align="center">
 
-# VideoDrop
+# VideoDrop Studio
 
-### YouTube → MP3, MP4 y texto. Rápido, elegante y sin fricción.
-
-<br/>
+### YouTube downloads, long-video segments, captions, and operational visibility.
 
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
 ![Python](https://img.shields.io/badge/Python_3.10+-1e3a8a?style=for-the-badge&logo=python&logoColor=white)
 ![yt-dlp](https://img.shields.io/badge/yt--dlp-c1121f?style=for-the-badge&logo=youtube&logoColor=white)
 ![ffmpeg](https://img.shields.io/badge/ffmpeg-007808?style=for-the-badge&logo=ffmpeg&logoColor=white)
-![Glassmorphism](https://img.shields.io/badge/UI-Glassmorphism-7c3aed?style=for-the-badge&logo=cssdesignawards&logoColor=white)
+![Vanilla JS](https://img.shields.io/badge/Vanilla_JS-f7df1e?style=for-the-badge&logo=javascript&logoColor=111827)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-30557c?style=for-the-badge&logo=postgresql&logoColor=white)
+![SSE](https://img.shields.io/badge/Server--Sent_Events-111827?style=for-the-badge&logo=icloud&logoColor=white)
+
+**Tags:** `fastapi` · `yt-dlp` · `ffmpeg` · `youtube-downloader` · `captions` · `sse` · `admin-dashboard` · `self-hosted`
 
 </div>
 
 ---
 
-## ¿Qué es esto?
+## What It Is
 
-**VideoDrop Studio** es una app web para descargar audio (**MP3**) o video (**MP4**) de YouTube,
-dividir videos largos por partes y desgrabar texto cuando el video expone subtítulos/captions.
-Backend en Python con **FastAPI**, descargas con **yt-dlp**, conversión con **ffmpeg** y frontend
-en HTML/CSS/JS puro.
+VideoDrop Studio is a focused web app for preparing YouTube media downloads and extracting captions when the source video exposes subtitles. It is built for a clean user flow: paste a link, inspect the available formats, convert only what is needed, and download the result.
 
-- Pega una URL → preview con thumbnail, título, uploader y duración.
-- Elige **Audio** o **Video** y escoge la calidad disponible.
-- Pulsa convertir → progreso en tiempo real (Server-Sent Events).
-- Descarga el archivo → lo borramos del servidor a los pocos segundos.
-- El desgrabador intenta extraer texto automáticamente después de leer el enlace.
-- Sin fricción para el usuario final, con controles de seguridad para operación.
+The app supports audio downloads, video downloads, long-video segmentation, caption extraction, a local admin dashboard, optional account history, and optional operational auditing through PostgreSQL.
 
-## Características
+## Core Experience
 
-- 🎵 **Audio MP3** a 128 / 192 / 320 kbps.
-- 🎬 **Video MP4** hasta 4K, con variantes 60 fps cuando el video original las tiene
-  (360p · 480p · 720p · 720p60 · 1080p · 1080p60 · 1440p · 1440p60 · 4K · 4K60).
-- ⚡ Optimizado para arrancar rápido: `concurrent_fragment_downloads=5`, cache de
-  metadatos, sin re-encode de video cuando los streams ya están en mp4.
-- 📡 Progreso en vivo con Server-Sent Events.
-- 📝 Desgrabador de captions/subtítulos con copia rápida del texto.
-- 🔒 Sanitización de nombres, validación de URL, límite de duración (30 min) y tamaño (2 GiB).
-- 🧹 Limpieza automática: archivos borrados al descargar + janitor cada 5 min.
-- 📱 Responsive total — móvil y escritorio (probado iPhone 13 Pro e iPad).
-- 🪟 UI premium tipo SaaS: dark mode, glassmorphism, blur, gradients.
-- 🛡️ Servicio aislado en systemd con hardening básico (no root, `ProtectSystem=strict`, `MemoryMax=600M`).
-- 🧭 Panel admin interno (`/admin`) con:
-  - monitoreo de tráfico,
-  - sesiones recientes con datos de navegador consentidos,
-  - registro de descargas y eventos,
-  - bloqueo/desbloqueo de IP en caliente,
-  - borrado de eventos de una sesión desde el panel.
-- 🗃️ Auditoría en PostgreSQL (`AUDIODROP_DATABASE_URL`).
-- 🧩 reCAPTCHA v3 opcional por variables de entorno para tráfico sospechoso.
-- 📜 Popup legal + páginas de Términos y Privacidad.
+- Paste a YouTube URL.
+- Fetch metadata: title, thumbnail, channel, duration, and available qualities.
+- Choose audio or video output.
+- Convert through `yt-dlp` and `ffmpeg`.
+- Stream job progress through Server-Sent Events.
+- Download the generated file.
+- Extract captions/transcripts when YouTube provides them.
+- For longer videos, select a segment instead of forcing one huge conversion.
 
-## Stack
+## Features
 
-| Capa       | Herramienta                                |
-|------------|--------------------------------------------|
-| Backend    | Python 3.10+, FastAPI, Uvicorn             |
-| Descarga   | yt-dlp (`player_client: ios,web` para evitar SABR) |
-| Conversión | ffmpeg (postprocessor de yt-dlp)           |
-| Streaming  | SSE (`StreamingResponse` de Starlette)     |
-| Frontend   | HTML5, CSS3 (custom props, backdrop-filter), JS vanilla |
-| Fuentes    | Inter + JetBrains Mono (Google Fonts)      |
-| Despliegue | systemd + Apache/nginx reverse proxy o Cloudflare Tunnel |
+- MP3 output at common bitrates.
+- MP4 output using available source qualities.
+- Long-video segment support.
+- Caption and subtitle extraction when exposed by the source.
+- Metadata caching to avoid repeated slow lookups for the same URL.
+- SSE progress stream for conversion jobs.
+- Temporary file cleanup after download and periodic janitor cleanup.
+- Legal acceptance flow with terms and privacy pages.
+- Optional reCAPTCHA v3 for suspicious traffic.
+- Optional user accounts and account history.
+- Local/admin panel for operational visibility.
+- Block/unblock IP controls for abuse handling.
+- Session and activity visibility without hiding what is collected.
+- Sentry integration through environment variables.
 
-## Estructura
+## Responsible Data Handling
 
-```
+VideoDrop is designed for transparent operational auditing, not hidden tracking. Browser telemetry and admin-visible activity must be explicit, visible in the UI/legal text, and handled through documented endpoints.
+
+Do not commit production secrets, admin entry secrets, session secrets, Sentry DSNs, database URLs, or real service tokens.
+
+## Tech Stack
+
+| Layer | Stack |
+| --- | --- |
+| Backend | Python 3.10+, FastAPI, Uvicorn |
+| Downloading | `yt-dlp` |
+| Conversion | `ffmpeg` |
+| Progress | Starlette `StreamingResponse` with SSE |
+| Frontend | HTML templates, vanilla JavaScript, CSS |
+| Persistence | Optional PostgreSQL audit store |
+| Abuse Controls | Optional reCAPTCHA v3, admin IP allowlist, IP blocking |
+| Deployment | systemd service behind a reverse proxy |
+
+## Project Structure
+
+```text
 audiodrop-work/
 ├── app/
-│   ├── main.py             # Endpoints HTTP (FastAPI)
-│   ├── audio_service.py    # yt-dlp + ffmpeg + cleanup + cache
+│   ├── main.py              # FastAPI routes and app wiring
+│   ├── audio_service.py     # yt-dlp, ffmpeg, jobs, segments, cleanup
+│   ├── audit_store.py       # Optional PostgreSQL audit/admin store
 │   ├── templates/
-│   │   └── index.html      # Vista principal con tabs Audio/Video
+│   │   ├── index.html
+│   │   ├── admin.html
+│   │   ├── account.html
+│   │   ├── terms.html
+│   │   └── privacy.html
 │   └── static/
-│       ├── style.css       # Glassmorphism dark theme
-│       └── app.js          # State machine del frontend
+│       ├── app.js
+│       ├── admin.js
+│       ├── account.js
+│       └── style.css
 ├── deploy/
-│   ├── audiodrop.service       # Unidad systemd
-│   ├── 006-audiodrop.conf      # vhost Apache (con Cache-Control: no-store en /static)
-│   └── install.sh              # Instalador one-shot
+│   ├── audiodrop.service
+│   ├── 006-audiodrop.conf
+│   └── install.sh
 ├── requirements.txt
-├── .env.example
-├── .gitignore
 ├── run.sh
+├── .env.example
 └── README.md
 ```
 
-## Endpoints
+## Main Endpoints
 
-| Método | Ruta                          | Descripción                                  |
-|--------|-------------------------------|----------------------------------------------|
-| GET    | `/`                           | UI principal                                 |
-| GET    | `/admin`                      | Panel admin (sólo red local admin)          |
-| GET    | `/terminos`                   | Página de términos y condiciones            |
-| GET    | `/privacidad`                 | Política de privacidad                       |
-| GET    | `/api/health`                 | Healthcheck                                  |
-| POST   | `/api/telemetry`              | Telemetría de navegador (consentida)         |
-| GET    | `/api/admin/overview`         | Resumen y eventos para el panel admin        |
-| POST   | `/api/admin/block-ip`         | Bloquear IP                                  |
-| POST   | `/api/admin/unblock-ip`       | Desbloquear IP                               |
-| POST   | `/api/admin/forget-client`    | Borrar eventos asociados a una sesión        |
-| POST   | `/api/metadata`               | Título, thumbnail, duración + `audio_options` y `video_options` disponibles |
-| POST   | `/api/transcript`             | Desgrabado de captions/subtítulos disponibles |
-| POST   | `/api/convert`                | Lanza el job. Body: `{url, format}` donde `format` ∈ `mp3-128 \| mp3-192 \| mp3-320 \| video-<height>[60]` |
-| GET    | `/api/progress/{job_id}`      | Stream SSE con el progreso                   |
-| GET    | `/api/download/{job_id}`      | Descarga el archivo (borra el server side después) |
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/` | Main UI |
+| `GET` | `/admin` | Admin dashboard |
+| `GET` | `/cuenta` | Account dashboard |
+| `GET` | `/terminos` | Terms |
+| `GET` | `/privacidad` | Privacy |
+| `GET` | `/api/health` | Health check |
+| `POST` | `/api/metadata` | Resolve video metadata and available outputs |
+| `POST` | `/api/transcript` | Extract captions/subtitles when available |
+| `POST` | `/api/convert` | Start a conversion job |
+| `GET` | `/api/progress/{job_id}` | SSE job progress |
+| `GET` | `/api/download/{job_id}` | Download and cleanup generated file |
+| `GET` | `/api/admin/overview` | Admin activity summary |
+| `POST` | `/api/admin/block-ip` | Block an abusive IP |
+| `POST` | `/api/admin/unblock-ip` | Unblock an IP |
+| `POST` | `/api/admin/forget-client` | Remove session-associated events |
 
-### Ejemplo
+## Local Development
 
-```bash
-# 1) Metadata (lista calidades disponibles para ese video)
-curl -s -X POST http://localhost:3400/api/metadata \
-  -H 'Content-Type: application/json' \
-  -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}' | jq
+Requirements:
 
-# 2) Convertir a video 1080p
-JOB=$(curl -s -X POST http://localhost:3400/api/convert \
-  -H 'Content-Type: application/json' \
-  -d '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ","format":"video-1080p"}' | jq -r .job_id)
-
-# 3) Escuchar progreso
-curl -N http://localhost:3400/api/progress/$JOB
-
-# 4) Descargar
-curl -o video.mp4 http://localhost:3400/api/download/$JOB
-```
-
-## Quickstart — desarrollo local
-
-Requisitos: `python3` 3.10+, `ffmpeg` en el `PATH`.
+- Python 3.10+
+- `ffmpeg` available in `PATH`
 
 ```bash
-git clone https://github.com/iClexi/audiodrop && cd audiodrop
-./run.sh
-# Abre http://localhost:3400
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --host 127.0.0.1 --port 3400 --reload
 ```
 
-## Despliegue en Ubuntu / Debian (sin Docker)
+Then open:
 
-```bash
-sudo bash deploy/install.sh
+```text
+http://127.0.0.1:3400
 ```
 
-Hace lo siguiente, idempotente:
+## Environment
 
-1. Instala `python3-venv`, `python3-pip` y `ffmpeg`.
-2. Crea el usuario `infra` si no existe.
-3. Copia el código a `/opt/audiodrop/app`.
-4. Crea un venv en `/opt/audiodrop/venv` con las dependencias.
-5. Escribe `/etc/audiodrop/audiodrop.env` con los defaults.
-6. Habilita la unidad `audiodrop.service` y arranca el servicio.
+Use `.env.example` as a safe template. Real values belong in an ignored local file or a protected server environment file.
 
-Después, copia el vhost de Apache (con `Cache-Control: no-store` para evitar JS/CSS viejo en CDN):
+Important settings:
 
-```bash
-sudo cp deploy/006-audiodrop.conf /etc/apache2/sites-enabled/
-sudo a2enmod headers
-sudo systemctl reload apache2
-```
+| Variable | Purpose |
+| --- | --- |
+| `AUDIODROP_PORT` | HTTP listen port. |
+| `AUDIODROP_WORK_DIR` | Temporary working directory for media jobs. |
+| `AUDIODROP_MAX_DURATION` | Segment size / duration policy in seconds. |
+| `AUDIODROP_ADMIN_IP` | Admin allowlist IP or trusted internal source. |
+| `AUDIODROP_ADMIN_ENTRY_SECRET` | Optional admin shortcut secret. Keep empty in Git. |
+| `AUDIODROP_DATABASE_URL` | Optional PostgreSQL DSN for audit/history/blocking. |
+| `AUDIODROP_RECAPTCHA_*` | Optional reCAPTCHA v3 configuration. |
+| `AUDIODROP_SENTRY_*` | Optional Sentry configuration. |
 
-O sirvelo con nginx:
+Never commit a filled `.env`, admin secret, database DSN, Sentry DSN, API key, or tunnel token.
 
-```nginx
-server {
-  listen 80;
-  server_name audiodrop.example.com;
+## Deployment Notes
 
-  location /static/ {
-    proxy_pass http://127.0.0.1:3400/static/;
-    add_header Cache-Control "no-store, must-revalidate";
-  }
-  location / {
-    proxy_pass http://127.0.0.1:3400;
-    proxy_http_version 1.1;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header X-Forwarded-Host $host;
-    proxy_buffering off;          # SSE necesita esto
-    proxy_read_timeout 300s;
-  }
-}
-```
+The repo includes a systemd unit, reverse-proxy template, and install script for a no-Docker deployment.
 
-O detrás de **Cloudflare Tunnel** apuntando al `127.0.0.1:3400` (o al puerto del socat
-si usas un patrón socat → VIP HA).
+High-level deployment flow:
 
-## Variables de entorno
+1. Install Python, `ffmpeg`, and app dependencies.
+2. Copy the app to the target runtime directory.
+3. Put secrets in a protected environment file outside Git.
+4. Start or restart `audiodrop.service`.
+5. Verify `/api/health`.
+6. Check logs for failed downloads, permission issues, or missing `ffmpeg`.
 
-| Variable                  | Default            | Para qué sirve                                  |
-|---------------------------|--------------------|-------------------------------------------------|
-| `AUDIODROP_PORT`          | `3400`             | Puerto de escucha (interno).                    |
-| `AUDIODROP_WORK_DIR`      | `/tmp/audiodrop`   | Directorio para descargas temporales.           |
-| `AUDIODROP_MAX_DURATION`  | `1800`             | Duración máxima permitida del video (segundos). |
-| `AUDIODROP_LOG_LEVEL`     | `INFO`             | Nivel de logs.                                  |
-| `AUDIODROP_ADMIN_IP`      | `192.168.68.83`    | IP LAN autorizada para panel admin.             |
-| `AUDIODROP_DATABASE_URL`  | *(vacío)*          | DSN PostgreSQL para auditoría y bloqueo IP.     |
-| `AUDIODROP_RECAPTCHA_SITE_KEY` | *(vacío)*     | Site key de reCAPTCHA v3.                       |
-| `AUDIODROP_RECAPTCHA_SECRET_KEY` | *(vacío)*   | Secret de reCAPTCHA v3; si falta, queda off.    |
-| `AUDIODROP_RECAPTCHA_SCORE_THRESHOLD` | `0.45` | Score mínimo para aceptar tráfico sospechoso.   |
+For Server-Sent Events, the reverse proxy should avoid buffering the progress stream and allow longer read timeouts for conversions.
 
-## Performance
+## Performance Notes
 
-Lo que se ha optimizado para que "Preparando…" no se eternice:
+- Metadata is cached briefly in memory.
+- `yt-dlp` uses concurrent fragments for DASH downloads.
+- Video output prefers remuxing over re-encoding whenever possible.
+- Audio conversion only runs the audio pipeline.
+- SSE updates are deduplicated to avoid noisy progress frames.
+- Temporary outputs are cleaned after download and by a periodic janitor.
 
-- **Cache de metadatos** (90 s, in-memory): `/api/metadata` y `/api/convert` ya no llaman a
-  yt-dlp dos veces seguidas para la misma URL.
-- **`player_client=[ios, web]`**: evita el modo SABR que añade retries en YouTube.
-- **`concurrent_fragment_downloads=5`**: las descargas DASH bajan 5 fragmentos en paralelo.
-- **Sin re-encode innecesario de video**: usamos `merge_output_format='mp4'` y un selector que
-  prioriza `mp4+m4a` (sólo remux, no transcode). Quitamos `FFmpegVideoConvertor` que forzaba un
-  re-encode adicional.
-- **Audio prefiere m4a** como fuente → ffmpeg sólo convierte audio (no re-empaqueta video).
-- **Dedup de SSE**: el servidor no spamea frames repetidos al cliente.
-- **`cachedir`** de yt-dlp en `/tmp/audiodrop-cache` para reuso de signatures entre runs.
+## Security Notes
 
-## Seguridad
+- The service should run as a non-root user.
+- Filenames are sanitized.
+- URLs are validated before processing.
+- Private or unavailable videos return user-friendly errors.
+- Download jobs are temporary and not intended as long-term storage.
+- Admin features should be restricted by trusted network controls and environment configuration.
+- reCAPTCHA is optional and only activates when configured.
 
-- El servicio corre como **`infra`** (no root) con `NoNewPrivileges`, `ProtectSystem=strict`,
-  `ProtectHome=true` y `MemoryMax=600M`.
-- URLs validadas por regex, nombres de archivo sanitizados.
-- Videos privados o no disponibles devuelven un mensaje legible (no stacktrace).
-- Duración máxima 30 min por defecto, tamaño máximo 2 GiB.
-- Cuerpo HTTP topado a 8 KiB por el reverse proxy.
-- reCAPTCHA v3 puede activarse con variables de entorno; sin claves no se carga ningún script externo.
-- Descargas se borran tras 1 h o al completar la descarga del cliente.
+## License
 
-## Limitaciones
-
-- Sin cola persistente: reiniciar el servicio pierde los jobs en curso.
-- Un único worker por proceso. Para alta concurrencia: varios workers de uvicorn + un job store
-  (Redis / SQLite).
-- Sólo procesa videos individuales (no playlists).
-
-## Licencia
-
-MIT. Úsalo responsablemente y respeta los Términos de Servicio de YouTube y los derechos del
-contenido al que se acceda.
+Use responsibly. Respect the rights of content owners and the terms of the services you access.

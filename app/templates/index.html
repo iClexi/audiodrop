@@ -19,7 +19,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/style.css?v=11" />
+  <link rel="stylesheet" href="/static/style.css?v=12" />
   {% include "sentry.html" %}
   {% if recaptcha_site_key %}
   <script>
@@ -95,6 +95,40 @@
     </div>
   </section>
 
+  <section id="auth-modal" class="auth-modal hidden" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <div class="auth-backdrop" data-auth-close></div>
+    <div class="auth-panel glass">
+      <div class="auth-head">
+        <div>
+          <p class="eyebrow">Cuenta opcional</p>
+          <h2 id="auth-title">Guarda tu historial de videos.</h2>
+        </div>
+        <button type="button" class="icon-button" data-auth-close aria-label="Cerrar">×</button>
+      </div>
+      <div class="auth-tabs" role="tablist" aria-label="Autenticación">
+        <button id="login-tab" type="button" class="auth-tab active" data-auth-mode="login">Entrar</button>
+        <button id="register-tab" type="button" class="auth-tab" data-auth-mode="register">Crear cuenta</button>
+      </div>
+      <form id="login-form" class="auth-form">
+        <label for="login-email">Correo</label>
+        <input id="login-email" name="email" type="email" autocomplete="email" required />
+        <label for="login-password">Contraseña</label>
+        <input id="login-password" name="password" type="password" autocomplete="current-password" required />
+        <button type="submit" class="primary">Entrar</button>
+      </form>
+      <form id="register-form" class="auth-form hidden">
+        <label for="register-username">Usuario</label>
+        <input id="register-username" name="username" type="text" autocomplete="username" minlength="2" required />
+        <label for="register-email">Correo</label>
+        <input id="register-email" name="email" type="email" autocomplete="email" required />
+        <label for="register-password">Contraseña</label>
+        <input id="register-password" name="password" type="password" autocomplete="new-password" minlength="8" required />
+        <button type="submit" class="primary">Crear cuenta</button>
+      </form>
+      <p id="auth-message" class="auth-message" role="status" aria-live="polite"></p>
+    </div>
+  </section>
+
   <a id="admin-link" class="admin-link hidden" href="/admin" aria-label="Panel admin">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
     Panel admin
@@ -116,6 +150,12 @@
       </span>
       <span class="brand-name">VideoDrop Studio</span>
     </a>
+    <div class="topbar-actions" aria-label="Cuenta">
+      <span id="session-user" class="session-user hidden"></span>
+      <a id="account-link" class="topbar-link hidden" href="/cuenta">Historial</a>
+      <button id="auth-open" type="button" class="topbar-button">Entrar</button>
+      <button id="logout-button" type="button" class="topbar-button hidden">Salir</button>
+    </div>
   </header>
 
   <main class="shell">
@@ -367,6 +407,6 @@
     <a class="footer-link" href="/privacidad">Privacidad</a>
   </footer>
 
-  <script src="/static/app.js?v=7" defer></script>
+  <script src="/static/app.js?v=8" defer></script>
 </body>
 </html>

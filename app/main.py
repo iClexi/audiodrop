@@ -9,9 +9,12 @@ import json
 import logging
 import os
 import re
+import secrets
 import time
 import urllib.parse
 import urllib.request
+import uuid
+from datetime import datetime, timedelta, timezone
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Any
@@ -35,10 +38,13 @@ log = logging.getLogger("audiodrop")
 BASE_DIR = Path(__file__).resolve().parent
 WORK_DIR = Path(os.environ.get("AUDIODROP_WORK_DIR", "/tmp/audiodrop"))
 MAX_DURATION = int(os.environ.get("AUDIODROP_MAX_DURATION", "1800"))  # 30 min
-ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "192.168.200.1")
+ADMIN_LAN_IP = os.environ.get("AUDIODROP_ADMIN_IP", "127.0.0.1")
 ADMIN_ENTRY_SECRET = os.environ.get("AUDIODROP_ADMIN_ENTRY_SECRET", "").strip()
 ADMIN_SESSION_COOKIE = "videodrop_admin"
 ADMIN_SESSION_TTL_SECONDS = max(300, int(os.environ.get("AUDIODROP_ADMIN_SESSION_TTL_SECONDS", "21600")))
+USER_SESSION_COOKIE = "videodrop_session"
+USER_SESSION_TTL_SECONDS = max(3600, int(os.environ.get("AUDIODROP_SESSION_TTL_SECONDS", "2592000")))
+PASSWORD_ITERATIONS = max(120000, int(os.environ.get("AUDIODROP_PASSWORD_ITERATIONS", "210000")))
 SENTRY_DSN = os.environ.get("AUDIODROP_SENTRY_DSN", "").strip()
 SENTRY_ENVIRONMENT = os.environ.get("AUDIODROP_SENTRY_ENVIRONMENT", os.environ.get("AUDIODROP_ENV", "production"))
 RECAPTCHA_SITE_KEY = os.environ.get("AUDIODROP_RECAPTCHA_SITE_KEY", "").strip()
@@ -81,7 +87,7 @@ WORK_DIR.mkdir(parents=True, exist_ok=True)
 service = AudioService(work_dir=WORK_DIR, max_duration=MAX_DURATION)
 audit_store = AuditStore(os.environ.get("AUDIODROP_DATABASE_URL"))
 
-app = FastAPI(title="VideoDrop", version="1.2.0", docs_url=None, redoc_url=None)
+app = FastAPI(title="VideoDrop", version="1.3.0", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -113,6 +119,8 @@ def _request_public_ip(request: Request) -> str:
 
 
 def _request_meta(request: Request, *, event_type: str, status_code: int) -> dict[str, Any]:
+    auth = getattr(request.state, "current_auth", None) or {}
+    user = auth.get("user") if isinstance(auth, dict) else None
     return {
         "event_type": event_type,
         "method": request.method,
@@ -125,6 +133,7 @@ def _request_meta(request: Request, *, event_type: str, status_code: int) -> dic
         "referer": request.headers.get("referer", ""),
         "request_host": request.headers.get("host", ""),
         "request_scheme": request.url.scheme,
+        "user_id": user.get("id") if isinstance(user, dict) else None,
     }
 
 
@@ -178,6 +187,10 @@ def _is_local_admin_request(request: Request) -> bool:
 
 
 def _is_admin_request(request: Request) -> bool:
+    auth = getattr(request.state, "current_auth", None) or {}
+    user = auth.get("user") if isinstance(auth, dict) else None
+    if isinstance(user, dict) and user.get("role") == "admin":
+        return True
     return _is_local_admin_request(request) or _has_admin_session(request)
 
 
@@ -192,6 +205,7 @@ def _is_secure_cookie_request(request: Request) -> bool:
 
 
 def _template_context(request: Request) -> dict[str, Any]:
+    auth = getattr(request.state, "current_auth", None) or {}
     return {
         "request": request,
         "sentry_dsn": SENTRY_DSN,
@@ -199,7 +213,138 @@ def _template_context(request: Request) -> dict[str, Any]:
         "sentry_release": SENTRY_RELEASE,
         "sentry_traces_sample_rate": SENTRY_TRACES_SAMPLE_RATE,
         "recaptcha_site_key": RECAPTCHA_SITE_KEY,
+        "current_user": auth.get("user") if isinstance(auth, dict) else None,
     }
+
+
+def _normalize_email(value: Any) -> str:
+    return str(value or "").strip().lower()[:160]
+
+
+def _clean_username(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())[:40]
+
+
+def _validate_password(value: Any) -> str:
+    password = str(value or "")
+    if len(password) < 8:
+        raise HTTPException(status_code=400, detail="La contraseña debe tener al menos 8 caracteres.")
+    if len(password) > 200:
+        raise HTTPException(status_code=400, detail="La contraseña es demasiado larga.")
+    return password
+
+
+def _password_digest(password: str, salt: str, iterations: int = PASSWORD_ITERATIONS) -> str:
+    return hashlib.pbkdf2_hmac(
+        "sha512",
+        password.encode("utf-8"),
+        salt.encode("utf-8"),
+        int(iterations),
+        dklen=64,
+    ).hex()
+
+
+def _hash_password(password: str) -> dict[str, Any]:
+    salt = secrets.token_urlsafe(18)
+    return {
+        "hash": _password_digest(password, salt, PASSWORD_ITERATIONS),
+        "salt": salt,
+        "iterations": PASSWORD_ITERATIONS,
+    }
+
+
+def _verify_password(password: str, user: dict[str, Any]) -> bool:
+    try:
+        digest = _password_digest(password, str(user.get("password_salt") or ""), int(user.get("password_iterations") or 0))
+    except (TypeError, ValueError):
+        return False
+    return hmac.compare_digest(digest, str(user.get("password_hash") or ""))
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _device_label(user_agent: str) -> str:
+    ua = user_agent.lower()
+    if "iphone" in ua:
+        device = "iPhone"
+    elif "ipad" in ua:
+        device = "iPad"
+    elif "android" in ua:
+        device = "Android"
+    elif "windows" in ua:
+        device = "Windows"
+    elif "mac os" in ua or "macintosh" in ua:
+        device = "Mac"
+    elif "linux" in ua:
+        device = "Linux"
+    else:
+        device = "Dispositivo"
+
+    if "edg/" in ua:
+        browser = "Edge"
+    elif "firefox/" in ua:
+        browser = "Firefox"
+    elif "safari/" in ua and "chrome/" not in ua:
+        browser = "Safari"
+    elif "chrome/" in ua or "chromium/" in ua:
+        browser = "Chrome"
+    else:
+        browser = "Navegador"
+    return f"{browser} en {device}"
+
+
+async def _current_auth(request: Request) -> dict[str, Any] | None:
+    if hasattr(request.state, "current_auth"):
+        return request.state.current_auth
+    request.state.current_auth = None
+    token = request.cookies.get(USER_SESSION_COOKIE, "")
+    if not token:
+        return None
+    try:
+        auth = await audit_store.auth_for_token(_token_hash(token))
+    except Exception as exc:  # noqa: BLE001 - no tumbamos descargas anonimas por fallo de auth.
+        log.warning("No se pudo resolver sesión de usuario: %s", exc)
+        auth = None
+    request.state.current_auth = auth
+    return auth
+
+
+async def _require_user(request: Request) -> dict[str, Any]:
+    auth = await _current_auth(request)
+    user = auth.get("user") if isinstance(auth, dict) else None
+    if not isinstance(user, dict):
+        raise HTTPException(status_code=401, detail="Inicia sesión.")
+    return user
+
+
+async def _attach_user_session(request: Request, response: JSONResponse, user: dict[str, Any]) -> None:
+    token = secrets.token_urlsafe(36)
+    expires_at = datetime.now(timezone.utc) + timedelta(seconds=USER_SESSION_TTL_SECONDS)
+    session = await audit_store.create_session(
+        session_id=str(uuid.uuid4()),
+        user_id=str(user["id"]),
+        token_hash=_token_hash(token),
+        device_label=_device_label(request.headers.get("user-agent", "")),
+        ip=_request_public_ip(request)[:80],
+        user_agent=(request.headers.get("user-agent", "") or "")[:700],
+        expires_at=expires_at,
+    )
+    request.state.current_auth = {"user": user, "session": session}
+    response.set_cookie(
+        USER_SESSION_COOKIE,
+        token,
+        max_age=USER_SESSION_TTL_SECONDS,
+        httponly=True,
+        secure=_is_secure_cookie_request(request),
+        samesite="lax",
+        path="/",
+    )
+
+
+def _clear_user_cookie(response: JSONResponse) -> None:
+    response.delete_cookie(USER_SESSION_COOKIE, path="/", samesite="lax")
 
 
 def _is_suspicious_request(request: Request) -> bool:
@@ -278,6 +423,8 @@ async def firewall_and_audit_middleware(request: Request, call_next):
             return JSONResponse({"detail": "Acceso denegado"}, status_code=403)
         return HTMLResponse("<h1>403 - Acceso denegado</h1>", status_code=403)
 
+    await _current_auth(request)
+
     try:
         response = await call_next(request)
     except Exception:
@@ -295,6 +442,11 @@ async def firewall_and_audit_middleware(request: Request, call_next):
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request) -> HTMLResponse:
     return templates.TemplateResponse("index.html", _template_context(request))
+
+
+@app.get("/cuenta", response_class=HTMLResponse)
+async def account_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse("account.html", _template_context(request))
 
 
 @app.get("/admin", response_class=HTMLResponse)
@@ -323,6 +475,125 @@ async def health() -> dict:
 @app.get("/api/admin-eligible")
 async def admin_eligible(request: Request) -> dict:
     return {"eligible": _is_admin_request(request)}
+
+
+@app.get("/api/auth/me")
+async def auth_me(request: Request) -> JSONResponse:
+    auth = await _current_auth(request)
+    user = auth.get("user") if isinstance(auth, dict) else None
+    return JSONResponse({"ok": True, "user": user})
+
+
+@app.post("/api/auth/register")
+async def auth_register(request: Request, payload: dict) -> JSONResponse:
+    if not audit_store.enabled:
+        raise HTTPException(status_code=503, detail="Registro no disponible temporalmente.")
+    username = _clean_username((payload or {}).get("username"))
+    email = str((payload or {}).get("email") or "").strip()[:160]
+    email_normalized = _normalize_email(email)
+    password = _validate_password((payload or {}).get("password"))
+    if len(username) < 2:
+        raise HTTPException(status_code=400, detail="El usuario debe tener al menos 2 caracteres.")
+    if not re.fullmatch(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email_normalized):
+        raise HTTPException(status_code=400, detail="Email inválido.")
+    digest = _hash_password(password)
+    try:
+        user = await audit_store.create_user(
+            user_id=str(uuid.uuid4()),
+            username=username,
+            email=email,
+            email_normalized=email_normalized,
+            password_hash=digest["hash"],
+            password_salt=digest["salt"],
+            password_iterations=digest["iterations"],
+            created_ip=_request_public_ip(request)[:80],
+            created_user_agent=(request.headers.get("user-agent", "") or "")[:700],
+        )
+    except Exception as exc:  # noqa: BLE001 - ocultamos detalles internos de unicidad/DB.
+        detail = str(exc).lower()
+        if "duplicate" in detail or "unique" in detail:
+            raise HTTPException(status_code=409, detail="Ese usuario o email ya existe.") from exc
+        raise
+    response = JSONResponse({"ok": True, "user": user}, status_code=201)
+    await _attach_user_session(request, response, user)
+    meta = _request_meta(request, event_type="register", status_code=201)
+    await audit_store.log_event(meta, payload={"email": email_normalized})
+    return response
+
+
+@app.post("/api/auth/login")
+async def auth_login(request: Request, payload: dict) -> JSONResponse:
+    if not audit_store.enabled:
+        raise HTTPException(status_code=503, detail="Login no disponible temporalmente.")
+    email_normalized = _normalize_email((payload or {}).get("email"))
+    password = str((payload or {}).get("password") or "")
+    user = await audit_store.find_user_by_email(email_normalized)
+    if not user or not _verify_password(password, user):
+        raise HTTPException(status_code=401, detail="Email o contraseña incorrectos.")
+    public_user = {k: user[k] for k in ("id", "username", "email", "role", "created_at")}
+    response = JSONResponse({"ok": True, "user": public_user})
+    await _attach_user_session(request, response, public_user)
+    meta = _request_meta(request, event_type="login", status_code=200)
+    await audit_store.log_event(meta, payload={"email": email_normalized})
+    return response
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(request: Request) -> JSONResponse:
+    auth = await _current_auth(request)
+    session = auth.get("session") if isinstance(auth, dict) else None
+    user = auth.get("user") if isinstance(auth, dict) else None
+    if isinstance(session, dict) and isinstance(user, dict):
+        await audit_store.revoke_session(user_id=str(user["id"]), session_id=str(session["id"]))
+    response = JSONResponse({"ok": True})
+    _clear_user_cookie(response)
+    return response
+
+
+@app.get("/api/account/history")
+async def account_history(request: Request) -> JSONResponse:
+    user = await _require_user(request)
+    events = await audit_store.user_history(str(user["id"]))
+    return JSONResponse({"ok": True, "events": events})
+
+
+@app.get("/api/account/sessions")
+async def account_sessions(request: Request) -> JSONResponse:
+    user = await _require_user(request)
+    auth = await _current_auth(request)
+    current_session = (auth or {}).get("session") if isinstance(auth, dict) else None
+    sessions = await audit_store.list_user_sessions(str(user["id"]))
+    return JSONResponse(
+        {
+            "ok": True,
+            "sessions": sessions,
+            "current_session_id": current_session.get("id") if isinstance(current_session, dict) else None,
+        }
+    )
+
+
+@app.post("/api/account/sessions/logout-others")
+async def account_logout_others(request: Request) -> JSONResponse:
+    user = await _require_user(request)
+    auth = await _current_auth(request)
+    session = (auth or {}).get("session") if isinstance(auth, dict) else None
+    if not isinstance(session, dict):
+        raise HTTPException(status_code=401, detail="Sesión no válida.")
+    count = await audit_store.revoke_other_sessions(user_id=str(user["id"]), keep_session_id=str(session["id"]))
+    return JSONResponse({"ok": True, "revoked": count})
+
+
+@app.post("/api/account/sessions/{session_id}/revoke")
+async def account_revoke_session(request: Request, session_id: str) -> JSONResponse:
+    user = await _require_user(request)
+    try:
+        normalized = str(uuid.UUID(session_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Sesión inválida.") from exc
+    removed = await audit_store.revoke_session(user_id=str(user["id"]), session_id=normalized)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Sesión no encontrada.")
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/admin-shortcut")
@@ -442,7 +713,17 @@ async def metadata(request: Request, payload: dict) -> JSONResponse:
     except ConversionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     meta = _request_meta(request, event_type="metadata", status_code=200)
-    await audit_store.log_event(meta, payload={"url": url})
+    await audit_store.log_event(
+        meta,
+        payload={
+            "url": url,
+            "title": info.get("title"),
+            "uploader": info.get("uploader"),
+            "duration": info.get("duration"),
+            "thumbnail": info.get("thumbnail"),
+            "segments": len(info.get("segments") or []),
+        },
+    )
     return JSONResponse(info)
 
 

@@ -115,12 +115,6 @@
     sendTelemetry(window.location.pathname);
   });
 
-  // Muestra el botón de admin sólo si el backend dice "eligible" (LAN del admin, sin Cloudflare).
-  fetch('/api/admin-eligible', { credentials: 'same-origin' })
-    .then((r) => r.ok ? r.json() : { eligible: false })
-    .then((d) => { if (d && d.eligible) document.getElementById('admin-link')?.classList.remove('hidden'); })
-    .catch(() => {});
-
   const $ = (id) => document.getElementById(id);
   const form = $('form');
   const urlInput = $('url');
@@ -149,6 +143,17 @@
   const transcriptMeta = $('transcript-meta');
   const transcriptText = $('transcript-text');
   const copyTranscriptBtn = $('copy-transcript');
+  const adminLink = $('admin-link');
+  const authModal = $('auth-modal');
+  const authOpen = $('auth-open');
+  const logoutButton = $('logout-button');
+  const accountLink = $('account-link');
+  const sessionUser = $('session-user');
+  const authMessage = $('auth-message');
+  const loginForm = $('login-form');
+  const registerForm = $('register-form');
+  const loginTab = $('login-tab');
+  const registerTab = $('register-tab');
 
   const state = {
     kind: 'audio',                  // 'audio' | 'video'
@@ -165,6 +170,7 @@
   let transcriptRequestId = 0;
   let activeTranscriptUrl = '';
   let transcriptInFlight = false;
+  let currentUser = null;
 
   const YOUTUBE_RE = /^(https?:\/\/)?((www|m|music)\.)?(youtube\.com\/(watch\?v=|shorts\/|embed\/)|youtu\.be\/)[\w\-]{6,}/i;
 
@@ -172,6 +178,75 @@
     hint.textContent = msg || '';
     hint.classList.remove('error', 'success');
     if (level) hint.classList.add(level);
+  };
+
+  const setAuthMessage = (message, level = '') => {
+    if (!authMessage) return;
+    authMessage.textContent = message || '';
+    authMessage.classList.remove('error', 'success');
+    if (level) authMessage.classList.add(level);
+  };
+
+  const setAuthMode = (mode) => {
+    const isRegister = mode === 'register';
+    loginForm?.classList.toggle('hidden', isRegister);
+    registerForm?.classList.toggle('hidden', !isRegister);
+    loginTab?.classList.toggle('active', !isRegister);
+    registerTab?.classList.toggle('active', isRegister);
+    setAuthMessage('');
+  };
+
+  const openAuth = (mode = 'login') => {
+    setAuthMode(mode);
+    authModal?.classList.remove('hidden');
+    document.body.classList.add('modal-open');
+  };
+
+  const closeAuth = () => {
+    authModal?.classList.add('hidden');
+    document.body.classList.remove('modal-open');
+  };
+
+  const safeJson = async (res) => {
+    try { return await res.json(); } catch { return {}; }
+  };
+
+  const authFetch = async (url, body) => {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body || {}),
+    });
+    const data = await safeJson(res);
+    if (!res.ok) throw new Error(data.detail || data.error || 'No se pudo completar la acción.');
+    return data;
+  };
+
+  const refreshAdminEligibility = () => {
+    fetch('/api/admin-eligible', { credentials: 'same-origin' })
+      .then((r) => r.ok ? r.json() : { eligible: false })
+      .then((d) => {
+        adminLink?.classList.toggle('hidden', !(d && d.eligible));
+      })
+      .catch(() => adminLink?.classList.add('hidden'));
+  };
+
+  const renderAuthState = (user) => {
+    currentUser = user || null;
+    authOpen?.classList.toggle('hidden', !!currentUser);
+    logoutButton?.classList.toggle('hidden', !currentUser);
+    accountLink?.classList.toggle('hidden', !currentUser);
+    sessionUser?.classList.toggle('hidden', !currentUser);
+    if (sessionUser) sessionUser.textContent = currentUser ? currentUser.username : '';
+    refreshAdminEligibility();
+  };
+
+  const refreshAuth = () => {
+    fetch('/api/auth/me', { credentials: 'same-origin' })
+      .then((r) => r.ok ? r.json() : { user: null })
+      .then((data) => renderAuthState(data.user || null))
+      .catch(() => renderAuthState(null));
   };
 
   const setLoading = (loading) => {
@@ -355,23 +430,6 @@
     return data.job_id;
   };
 
-  const tryAdminShortcut = async (value) => {
-    if (!value || YOUTUBE_RE.test(value) || value.length < 10 || !value.includes('@')) return false;
-    const res = await fetch('/api/admin-shortcut', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ secret: value }),
-    }).catch(() => null);
-    if (!res || !res.ok) return false;
-    const data = await safelyParse(res);
-    if (data?.redirect) {
-      window.location.href = data.redirect;
-      return true;
-    }
-    return false;
-  };
-
   const fetchTranscript = async (url) => {
     const body = await withCaptcha({ url }, 'transcript');
     const res = await fetch('/api/transcript', {
@@ -512,10 +570,55 @@
     } catch { setHint('Tu navegador no permitió pegar. Pega manualmente.', 'error'); }
   });
 
+  authOpen?.addEventListener('click', () => openAuth('login'));
+  authModal?.querySelectorAll('[data-auth-close]').forEach((el) => {
+    el.addEventListener('click', closeAuth);
+  });
+  loginTab?.addEventListener('click', () => setAuthMode('login'));
+  registerTab?.addEventListener('click', () => setAuthMode('register'));
+
+  loginForm?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const formData = new FormData(loginForm);
+    setAuthMessage('Entrando...');
+    try {
+      const data = await authFetch('/api/auth/login', {
+        email: formData.get('email'),
+        password: formData.get('password'),
+      });
+      renderAuthState(data.user || null);
+      setAuthMessage('Sesión iniciada.', 'success');
+      closeAuth();
+    } catch (err) {
+      setAuthMessage(err.message || 'No se pudo iniciar sesión.', 'error');
+    }
+  });
+
+  registerForm?.addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const formData = new FormData(registerForm);
+    setAuthMessage('Creando cuenta...');
+    try {
+      const data = await authFetch('/api/auth/register', {
+        username: formData.get('username'),
+        email: formData.get('email'),
+        password: formData.get('password'),
+      });
+      renderAuthState(data.user || null);
+      setAuthMessage('Cuenta creada.', 'success');
+      closeAuth();
+    } catch (err) {
+      setAuthMessage(err.message || 'No se pudo crear la cuenta.', 'error');
+    }
+  });
+
+  logoutButton?.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+    renderAuthState(null);
+  });
+
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const value = urlInput.value.trim();
-    if (await tryAdminShortcut(value)) return;
     previewFromInput();
   });
 
@@ -558,4 +661,5 @@
   });
 
   window.addEventListener('beforeunload', () => { if (eventSource) eventSource.close(); });
+  refreshAuth();
 })();

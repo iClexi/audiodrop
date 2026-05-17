@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>VideoDrop · Historial</title>
+  <link rel="stylesheet" href="/static/style.css?v=12" />
+  {% include "sentry.html" %}
+</head>
+<body>
+  <div class="aurora" aria-hidden="true">
+    <span class="orb orb-1"></span>
+    <span class="orb orb-2"></span>
+    <span class="orb orb-3"></span>
+    <span class="grid"></span>
+  </div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="VideoDrop">
+      <span class="brand-name">VideoDrop Historial</span>
+    </a>
+    <div class="topbar-actions">
+      <a class="topbar-link" href="/">Convertidor</a>
+      <button id="account-logout" class="topbar-button" type="button">Salir</button>
+    </div>
+  </header>
+
+  <main class="shell account-shell">
+    <section class="card glass account-hero">
+      <div>
+        <p class="eyebrow">Cuenta opcional</p>
+        <h1>Tu historial de VideoDrop</h1>
+        <p id="account-summary" class="section-copy">Cargando tu actividad reciente...</p>
+      </div>
+    </section>
+
+    <section class="account-grid">
+      <article class="card glass">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Actividad</p>
+            <h2 class="section-title">Videos y acciones</h2>
+          </div>
+        </div>
+        <div id="history-list" class="history-list"></div>
+      </article>
+
+      <article class="card glass">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Sesiones</p>
+            <h2 class="section-title">Dispositivos conectados</h2>
+          </div>
+          <button id="logout-others" class="ghost" type="button">Cerrar otras</button>
+        </div>
+        <div id="sessions-list" class="sessions-list"></div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <a class="footer-link" href="/terminos">Términos</a>
+    <span class="muted">·</span>
+    <a class="footer-link" href="/privacidad">Privacidad</a>
+  </footer>
+
+  <script src="/static/account.js?v=1" defer></script>
+</body>
+</html>
